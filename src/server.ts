@@ -170,7 +170,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === 'GET' && request.url === '/') {
-    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
     response.end(page())
     return
   }
