@@ -1,4 +1,7 @@
 # esbuild の postinstall は不要（プラットフォーム別バイナリが optional dependency で入るため）。
 # tsx / tsc が動くことを確認済み。
+packages:
+  - .
+
 allowBuilds:
   esbuild: false

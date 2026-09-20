@@ -1,5 +1,7 @@
 import { chromium, type Page } from 'playwright'
 import { writeFileSync } from 'node:fs'
+import { lookup } from 'node:dns/promises'
+import { isIP } from 'node:net'
 
 const input = process.argv[2]
 const maxArg = process.argv.find((arg) => arg.startsWith('--max='))
@@ -76,6 +78,46 @@ function sameSite(value: string): boolean {
   }
 }
 
+function isPrivateAddress(address: string): boolean {
+  const value = address.toLowerCase()
+  if (isIP(value) === 4) {
+    const [a, b] = value.split('.').map(Number)
+    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127) || (a === 198 && (b === 18 || b === 19)) || a >= 224
+  }
+  if (isIP(value) === 6) {
+    if (value.startsWith('::ffff:')) return isPrivateAddress(value.slice(7))
+    return value === '::' || value === '::1' || value.startsWith('fc') || value.startsWith('fd') || /^fe[89ab]/.test(value)
+  }
+  return true
+}
+
+async function assertPublicUrl(value: string): Promise<void> {
+  const url = new URL(value)
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`許可されていないURL: ${value}`)
+  if (url.username || url.password) throw new Error('認証情報を含むURLは指定できません。')
+  const hostname = url.hostname.replace(/^\[|\]$/g, '')
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) throw new Error('ローカルアドレスは診断できません。')
+  const addresses = isIP(hostname) ? [{ address: hostname }] : await lookup(hostname, { all: true, verbatim: true })
+  if (addresses.length === 0 || addresses.some(({ address }) => isPrivateAddress(address))) {
+    throw new Error(`プライベートアドレスへのアクセスはできません: ${hostname}`)
+  }
+}
+
+async function safeFetch(value: string): Promise<Response> {
+  let current = value
+  for (let redirects = 0; redirects <= 5; redirects++) {
+    await assertPublicUrl(current)
+    const response = await fetch(current, { signal: AbortSignal.timeout(15_000), redirect: 'manual' })
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response
+    const location = response.headers.get('location')
+    if (!location) return response
+    current = new URL(location, current).href
+  }
+  throw new Error('リダイレクト回数が上限を超えました。')
+}
+
 function decodeXml(value: string): string {
   return value
     .replaceAll('&amp;', '&')
@@ -97,7 +139,7 @@ async function loadSitemaps(robotsText: string): Promise<Set<string>> {
     visitedSitemaps.add(sitemapUrl)
 
     try {
-      const response = await fetch(sitemapUrl, { signal: AbortSignal.timeout(15_000) })
+      const response = await safeFetch(sitemapUrl)
       if (!response.ok) continue
       const xml = await response.text()
       const locations = [...xml.matchAll(/<loc(?:\s[^>]*)?>([\s\S]*?)<\/loc>/gi)]
@@ -171,12 +213,12 @@ function escapeCell(value: string): string {
 console.log(`診断開始: ${startUrl.href}`)
 console.log(`最大ページ数: ${maxPages}`)
 
+await assertPublicUrl(startUrl.href)
+
 let robotsText = ''
 let robotsStatus: number | null = null
 try {
-  const robotsResponse = await fetch(new URL('/robots.txt', startUrl.origin), {
-    signal: AbortSignal.timeout(15_000),
-  })
+  const robotsResponse = await safeFetch(new URL('/robots.txt', startUrl.origin).href)
   robotsStatus = robotsResponse.status
   if (robotsResponse.ok) robotsText = await robotsResponse.text()
 } catch {
@@ -191,7 +233,16 @@ const results: PageResult[] = []
 
 const browser = await chromium.launch()
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  await context.route('**/*', async (route) => {
+    try {
+      await assertPublicUrl(route.request().url())
+      await route.continue()
+    } catch {
+      await route.abort('blockedbyclient')
+    }
+  })
+  const page = await context.newPage()
   while (queue.length > 0 && results.length < maxPages) {
     const url = queue.shift()!
     console.log(`[${results.length + 1}/${maxPages}] ${url}`)

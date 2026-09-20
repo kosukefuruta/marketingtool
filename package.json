@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "seo:audit": "tsx src/audit.ts",
+    "start": "tsx src/server.ts",
     "typecheck": "tsc"
   },
   "dependencies": {
-    "playwright": "^1.49.0"
+    "playwright": "1.62.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -62,6 +62,19 @@ XMLサイトマップとページ内の内部リンクから、同じオリジ�
 pnpm typecheck
 ```
 
+## Koyebへデプロイ
+
+このリポジトリにはPlaywrightとChromiumを含む`Dockerfile`があります。
+
+1. KoyebでWeb Serviceを作成する
+2. GitHubの`kosukefuruta/marketingtool`を選択する
+3. Builderに`Dockerfile`を選択する
+4. 公開ポートを`8000`、プロトコルをHTTPにする
+5. HTTPヘルスチェックのパスを`/health`にする
+6. デプロイする
+
+アプリケーションはKoyebが設定する`PORT`環境変数を利用します。Chromiumを起動するため、メモリ不足になる場合はインスタンスサイズを上げてください。
+
 詳しい現在の仕様は[docs/seo-audit-v0.1.md](docs/seo-audit-v0.1.md)を参照してください。
 
 ## 現在の制約
