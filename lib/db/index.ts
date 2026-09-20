@@ -17,3 +17,7 @@ const client = globalThis.__marketingToolPg ?? postgres(databaseUrl ?? "postgres
 if (process.env.NODE_ENV !== "production") globalThis.__marketingToolPg = client
 
 export const db = drizzle({ client })
+
+export async function closeDatabase(): Promise<void> {
+  await client.end({ timeout: 5 })
+}
