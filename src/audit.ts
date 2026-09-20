@@ -78,6 +78,11 @@ function sameSite(value: string): boolean {
   }
 }
 
+function isCrawlablePage(value: string): boolean {
+  const pathname = new URL(value).pathname.toLowerCase()
+  return !/\.(?:avif|bmp|css|csv|docx?|eot|gif|ico|jpe?g|js|json|mp3|mp4|mov|pdf|png|pptx?|svg|tar|tiff?|txt|wav|webm|webp|woff2?|xlsx?|xml|zip)$/.test(pathname)
+}
+
 function isPrivateAddress(address: string): boolean {
   const value = address.toLowerCase()
   if (isIP(value) === 4) {
@@ -149,7 +154,7 @@ async function loadSitemaps(robotsText: string): Promise<Set<string>> {
       } else {
         for (const location of locations) {
           const normalized = normalizeUrl(location)
-          if (normalized && sameSite(normalized)) discovered.add(normalized)
+          if (normalized && sameSite(normalized) && isCrawlablePage(normalized)) discovered.add(normalized)
         }
       }
     } catch {
@@ -162,8 +167,10 @@ async function loadSitemaps(robotsText: string): Promise<Set<string>> {
 
 async function inspectPage(page: Page, url: string): Promise<PageResult> {
   try {
-    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-    await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {})
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20_000 })
+    // DOMContentLoaded後に短く待ち、一般的なクライアント描画を取り込む。
+    // networkidle待ちは広告や計測通信のあるページで毎回タイムアウトし、巡回を大幅に遅くするため使わない。
+    await page.waitForTimeout(500)
     const data = await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]')).map((link) => link.href)
       const images = Array.from(document.querySelectorAll<HTMLImageElement>('img'))
@@ -237,6 +244,10 @@ try {
   await context.route('**/*', async (route) => {
     try {
       await assertPublicUrl(route.request().url())
+      if (['image', 'media', 'font'].includes(route.request().resourceType())) {
+        await route.abort('blockedbyclient')
+        return
+      }
       await route.continue()
     } catch {
       await route.abort('blockedbyclient')
@@ -251,7 +262,7 @@ try {
 
     for (const link of result.links) {
       const normalized = normalizeUrl(link, result.finalUrl)
-      if (!normalized || !sameSite(normalized) || queued.has(normalized)) continue
+      if (!normalized || !sameSite(normalized) || !isCrawlablePage(normalized) || queued.has(normalized)) continue
       queued.add(normalized)
       queue.push(normalized)
     }

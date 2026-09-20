@@ -34,7 +34,7 @@ function page(message = ''): string {
       <input name="url" type="url" placeholder="https://example.com" required>
     </label>
     <label>最大ページ数
-      <input name="max" type="number" min="1" max="100" value="30" required>
+      <input name="max" type="number" min="1" max="300" value="100" required>
     </label>
     <button type="submit">診断を開始</button>
   </form>
@@ -64,7 +64,7 @@ function runAudit(url: string, max: number, output: string): Promise<void> {
     const timer = setTimeout(() => {
       child.kill('SIGTERM')
       reject(new Error('診断が制限時間を超えました。ページ数を減らしてください。'))
-    }, 180_000)
+    }, 600_000)
     child.on('error', (error) => {
       clearTimeout(timer)
       reject(error)
@@ -101,8 +101,8 @@ const server = createServer(async (request, response) => {
     try {
       const params = new URLSearchParams(await collectBody(request))
       const url = params.get('url')?.trim() ?? ''
-      const max = Number(params.get('max') ?? 30)
-      if (!url || !Number.isInteger(max) || max < 1 || max > 100) throw new Error('URLとページ数（1〜100）を正しく入力してください。')
+      const max = Number(params.get('max') ?? 100)
+      if (!url || !Number.isInteger(max) || max < 1 || max > 300) throw new Error('URLとページ数（1〜300）を正しく入力してください。')
 
       output = join(tmpdir(), `seo-report-${randomUUID()}.md`)
       auditing = true
