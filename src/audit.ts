@@ -1,4 +1,4 @@
-import { chromium, type Page } from 'playwright'
+import { chromium, type BrowserContext, type Page } from 'playwright'
 import { writeFileSync } from 'node:fs'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
@@ -223,6 +223,39 @@ async function inspectPage(page: Page, url: string): Promise<PageResult> {
   }
 }
 
+async function inspectPageWithin(context: BrowserContext, url: string, timeoutMs: number): Promise<PageResult> {
+  const page = await context.newPage()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<PageResult>((resolve) => {
+    timer = setTimeout(() => {
+      void page.close().catch(() => {})
+      resolve({
+        url,
+        finalUrl: url,
+        status: null,
+        title: '',
+        description: '',
+        h1s: [],
+        canonical: '',
+        robots: '',
+        lang: '',
+        textLength: 0,
+        links: [],
+        images: 0,
+        imagesWithoutAlt: 0,
+        error: `ページ診断が${Math.round(timeoutMs / 1000)}秒を超えたため中断した`,
+      })
+    }, timeoutMs)
+  })
+
+  try {
+    return await Promise.race([inspectPage(page, url), timeout])
+  } finally {
+    if (timer) clearTimeout(timer)
+    await page.close().catch(() => {})
+  }
+}
+
 function escapeCell(value: string): string {
   return value.replaceAll('|', '\\|').replaceAll('\n', ' ')
 }
@@ -270,11 +303,10 @@ try {
       await route.abort('blockedbyclient')
     }
   })
-  const page = await context.newPage()
   while (queue.length > 0 && results.length < maxPages) {
     const url = queue.shift()!
     console.log(`[${results.length + 1}/${maxPages}] ${url}`)
-    const result = await inspectPage(page, url)
+    const result = await inspectPageWithin(context, url, 8_000)
     results.push(result)
 
     for (const link of result.links) {
