@@ -27,7 +27,7 @@
 - 1ユーザーにつき1サイトだけ登録できる
 - Stripeのテスト環境と本番環境の両方で契約を開始できる
 - StripeからのWebhookで契約状態がDBへ反映される
-- Customer Portalから支払方法変更と解約予約ができる
+- Owtellの契約設定画面から支払方法変更と解約予約ができる（カード入力のみStripe Checkoutの`setup`モードへ委譲する）
 - 解約予約後も契約終了日までは有料状態として扱われる
 - Webアプリの再起動後もユーザー、サイト、契約状態が失われない
 - 他ユーザーのサイトや契約情報へアクセスできない
@@ -46,7 +46,7 @@
 | DB | PostgreSQL。初期候補はNeon Launch | アプリ再起動と独立して永続化でき、初期の固定費を抑えやすい |
 | ORM・マイグレーション | Drizzle ORM / Drizzle Kit | TypeScriptでスキーマを管理し、SQL変更を履歴化できる |
 | 認証 | Better Auth | Linbyと同じメールOTP方式とDBセッションを利用できる |
-| 決済 | Stripe Checkout + Billing + Customer Portal | カード情報と契約管理画面を自システムで保持しなくてよい |
+| 決済 | Stripe Checkout + Billing | カード情報を自システムで保持しなくてよい。契約管理画面はOwtell側で実装し、カード入力のみCheckoutの`setup`モードへ委譲する |
 | メール | Amazon SES | 認証・再設定などのトランザクションメールを低コストで送信できる |
 | テスト | Node test runner + Playwright | ロジック、HTTP、ブラウザフローを分けて確認できる |
 
@@ -133,8 +133,8 @@ Checkoutから戻ったことだけでは契約を有効にしない。署名検
 
 ```text
 契約設定
-  → Stripe Customer Portal
-  → 期間終了時の解約を指定
+  → Owtellの契約設定画面で解約を予約
+  → StripeのSubscriptionを更新
   → Webhook受信
   → アプリに終了予定日を表示
   → 終了日までは利用可能
@@ -160,7 +160,7 @@ MVPでは即時解約や日割り返金をアプリから提供しない。例�
 
 - `/dashboard`: Phase 1ではサイト名、契約状態、次のPhaseの案内
 - `/settings/site`: サイト情報の確認と変更
-- `/settings/billing`: 金額、状態、次回更新日、終了予定日、Portalへの導線
+- `/settings/billing`: 金額、状態、次回更新日、終了予定日、支払方法、請求履歴、解約予約と取り消し
 - `/settings/account`: メールアドレス、ログアウト（後続実装）
 
 ### 6.4 エラー画面
@@ -297,7 +297,7 @@ SESの準備では次を行う。
 - Product: Owtell SEO診断ツール 有料版
 - Price: 月額1,980円、JPY、税込を想定
 - 支払方法: 初期はカード
-- Customer Portal: 支払方法変更、請求履歴、期間終了時解約を有効化
+- 支払方法変更: Checkoutの`setup`モードでカードを登録し、`setup_intent.succeeded`で既定の支払方法に設定する
 - Checkout: Stripeホスト型画面を利用
 - 本番とテストでProduct ID、Price ID、Webhook Secretを分離
 
@@ -307,7 +307,7 @@ SESの準備では次を行う。
 
 - `POST /billing/checkout`: Checkout Sessionを作成
 - `GET /billing/complete`: Checkoutからの戻り先。契約確定は行わない
-- `POST /billing/portal`: Customer Portal Sessionを作成
+- 契約設定画面のServer Action: 支払方法変更用のCheckout Session作成、解約予約と取り消し
 - `POST /webhooks/stripe`: 署名検証後にイベントを処理
 
 Checkout作成時に、アプリの`user_id`をStripe CustomerまたはSubscriptionのmetadataへ設定する。既存Customerがある場合は必ず再利用し、同一ユーザーの重複契約を防ぐ。
@@ -318,8 +318,7 @@ Checkout作成時に、アプリの`user_id`をStripe CustomerまたはSubscript
 - `customer.subscription.created`
 - `customer.subscription.updated`
 - `customer.subscription.deleted`
-- `invoice.paid`
-- `invoice.payment_failed`
+- `setup_intent.succeeded`（支払方法の変更を既定の支払方法へ反映する）
 
 Stripeのイベント名と必要イベントは実装時の公式仕様で再確認する。Webhookの受信順序には依存せず、必要に応じてStripe APIから最新Subscriptionを取得してDBへ同期する。
 
@@ -430,11 +429,11 @@ STRIPE_PRICE_ID
 
 完了条件: Checkoutの戻りURLを直接開いても有料化されず、Webhook後だけ有料状態になる。
 
-### Step 7: Customer Portalと設定画面
+### Step 7: 契約設定画面
 
-- Portal Session作成を実装する
+- 支払方法変更用のCheckout Session作成と、解約予約・取り消しを実装する
 - 契約状態、次回更新日、解約予定日を表示する
-- 支払方法変更と期間終了時解約を確認する
+- 支払方法変更と期間終了時解約を確認する。契約状態の変更はWebhook受信後にのみ画面へ反映する
 - 支払い失敗時の案内を実装する
 
 完了条件: 解約予約後も終了日までは利用でき、終了後は有料APIが拒否される。

@@ -54,7 +54,7 @@ Koyebが与える`PORT`はアプリが自動で利用するため、通常は手
   - `customer.subscription.created`
   - `customer.subscription.updated`
   - `customer.subscription.deleted`
-- Customer Portalで支払方法変更と「期間終了時に解約」を有効化する
+  - `setup_intent.succeeded`
 
 ### Amazon SES
 
@@ -70,7 +70,7 @@ Koyebが与える`PORT`はアプリが自動で利用するため、通常は手
 4. サイトを1件登録できる
 5. Stripeテスト環境でCheckoutを完了できる
 6. Webhook反映後だけ有料状態になる
-7. Customer Portalで解約予約できる
+7. 契約設定画面で解約予約と支払方法変更ができる
 8. 再デプロイ後もログイン・サイト・契約情報が残る
 
 ## 現在の注意点

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 
 const AUDIT_TIMEOUT_MS = 600_000
 const FORCE_KILL_DELAY_MS = 10_000
+const EXIT_WAIT_MS = 30_000
 
 export type AuditJob = {
   status: "running" | "done" | "error"
@@ -81,12 +82,13 @@ export function startAudit(url: string, max: number): string {
   if (isAuditRunning()) throw new Error("現在、別の診断を実行中です。少し待ってから再実行してください。")
   const id = crypto.randomUUID()
   const output = join(tmpdir(), `seo-report-${id}.md`)
-  auditJobs.set(id, { status: "running", createdAt: Date.now(), progress: "診断の準備中です。" })
-  globalThis.__auditRunning = true
+  // Claim the slot only once the child exists: a synchronous spawn failure would otherwise hold it forever.
   const { result, exited } = runAudit(url, max, output, (progress) => {
     const job = auditJobs.get(id)
     if (job?.status === "running") job.progress = progress
   })
+  auditJobs.set(id, { status: "running", createdAt: Date.now(), progress: "診断の準備中です。" })
+  globalThis.__auditRunning = true
   void result.then(async () => {
     auditJobs.set(id, { status: "done", createdAt: Date.now(), report: await readFile(output, "utf8") })
   }).catch((error: unknown) => {
@@ -94,7 +96,8 @@ export function startAudit(url: string, max: number): string {
   }).finally(async () => {
     // A timeout rejects before the child is gone; releasing the slot early would let a second crawl run
     // alongside the dying one, and the file must outlive the child that is still writing to it.
-    await exited
+    // The wait is bounded because "close" also waits on the stdout pipe, which a leaked Chromium can hold open.
+    await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, EXIT_WAIT_MS).unref())])
     globalThis.__auditRunning = false
     await unlink(output).catch(() => undefined)
   })
