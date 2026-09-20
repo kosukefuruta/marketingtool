@@ -1,6 +1,6 @@
 "use server"
 
-import { eq } from "drizzle-orm"
+import { and, eq, isNull } from "drizzle-orm"
 import { redirect } from "next/navigation"
 import { db } from "@/lib/db"
 import { site, subscription, user } from "@/lib/db/schema"
@@ -9,11 +9,18 @@ import { defaultSiteName, normalizePublicSiteUrl } from "@/lib/sites"
 import { getStripe } from "@/lib/stripe"
 import { blocksNewCheckout } from "@/lib/subscription-access"
 
-export async function saveSite(formData: FormData): Promise<void> {
+export type SiteFormState = { error?: string }
+
+export async function saveSite(_state: SiteFormState, formData: FormData): Promise<SiteFormState> {
   const current = await requireSession()
   const rawUrl = String(formData.get("url") ?? "")
   const rawName = String(formData.get("name") ?? "").trim()
-  const normalized = await normalizePublicSiteUrl(rawUrl)
+  let normalized: Awaited<ReturnType<typeof normalizePublicSiteUrl>>
+  try {
+    normalized = await normalizePublicSiteUrl(rawUrl)
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "正しいサイトURLを入力してください。" }
+  }
   const now = new Date()
   await db.insert(site).values({
     id: crypto.randomUUID(),
@@ -49,8 +56,15 @@ async function findOrCreateStripeCustomer(userId: string): Promise<string> {
     name: account.name,
     metadata: { userId },
   })
-  await db.update(user).set({ stripeCustomerId: customer.id, updatedAt: new Date() }).where(eq(user.id, userId))
-  return customer.id
+  const claimed = await db.update(user).set({ stripeCustomerId: customer.id, updatedAt: new Date() })
+    .where(and(eq(user.id, userId), isNull(user.stripeCustomerId)))
+    .returning({ stripeCustomerId: user.stripeCustomerId })
+  if (claimed.length > 0) return customer.id
+
+  // A concurrent checkout stored a different customer first; that one is the customer Stripe will bill.
+  const [winner] = await db.select({ stripeCustomerId: user.stripeCustomerId })
+    .from(user).where(eq(user.id, userId)).limit(1)
+  return winner?.stripeCustomerId ?? customer.id
 }
 
 export async function startCheckout(): Promise<void> {

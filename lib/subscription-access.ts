@@ -16,6 +16,11 @@ export function hasPaidAccess(
   return ACCESSIBLE_SUBSCRIPTION_STATUSES.has(status)
 }
 
+export function storedSubscriptionStatus(status: string, cancelAtPeriodEnd: boolean): string {
+  if (!cancelAtPeriodEnd) return status
+  return status === "active" || status === "trialing" ? "canceling" : status
+}
+
 export function gracePeriodForStatus(
   status: string,
   existingGracePeriodEndsAt: Date | null | undefined,

@@ -34,7 +34,9 @@ export function isAuditRunning(): boolean {
 
 function runAudit(url: string, max: number, output: string, onProgress: (value: string) => void): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--import", "tsx", "src/audit.ts", url, `--max=${max}`, `--output=${output}`], {
+    // The production image ships a bundled audit script; local development runs the TypeScript source.
+    const script = process.env.AUDIT_SCRIPT ? [process.env.AUDIT_SCRIPT] : ["--import", "tsx", "src/audit.ts"]
+    const child = spawn(process.execPath, [...script, url, `--max=${max}`, `--output=${output}`], {
       stdio: ["ignore", "pipe", "inherit"],
       env: process.env,
     })
