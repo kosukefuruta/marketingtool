@@ -15,7 +15,7 @@ function page(message = ''): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>SEO診断ツール</title>
+  <title>Owtell SEO診断ツール</title>
   <style>
     :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
     body { max-width: 720px; margin: 64px auto; padding: 0 20px; line-height: 1.6; }
@@ -26,7 +26,7 @@ function page(message = ''): string {
   </style>
 </head>
 <body>
-  <h1>SEO診断ツール</h1>
+  <h1>Owtell SEO診断ツール</h1>
   <p>公開サイトのURLを入力すると、技術SEO上の問題をMarkdownで返します。</p>
   ${message ? `<p class="message">${message}</p>` : ''}
   <form method="post" action="/audit">
