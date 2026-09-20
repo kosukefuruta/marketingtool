@@ -456,49 +456,102 @@ for (const url of missingFromCrawl) findings.push({ severity: '中', url, issue:
 const severityOrder = { 高: 0, 中: 1, 低: 2 }
 findings.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity] || a.url.localeCompare(b.url))
 
-const siteStrengths: string[] = []
-if (robotsStatus === 200) siteStrengths.push('robots.txtを正常に取得できる')
-if (sitemapUrls.size > 0) siteStrengths.push(`XMLサイトマップから${sitemapUrls.size}件のURLを確認できる`)
+type Evaluation = '良好' | '要確認' | '要改善' | '取得不能'
+type DiagnosticRow = { item: string; evaluation: Evaluation; detail: string }
 
-function pageStrengths(page: PageResult): string[] {
-  if (page.error || page.status === null || page.status >= 400) return []
-  const items = [`HTTP ${page.status}で正常に取得できる`]
-  if (page.title) items.push('titleが設定されている')
-  if (page.description) items.push('meta descriptionが設定されている')
-  if (page.h1s.length === 1) items.push('H1が1つに整理されている')
-  if (page.canonical && sameSite(page.canonical)) items.push('同一サイト内のcanonicalが設定されている')
-  if (page.lang) items.push(`html要素にlang属性（${page.lang}）が設定されている`)
-  if (!/\bnoindex\b/i.test(page.robots)) items.push('noindexが指定されていない')
-  if (page.textLength >= 200) items.push(`十分な可視テキストを取得できる（${page.textLength}文字）`)
-  if (page.images > 0 && page.imagesWithoutAlt === 0) items.push(`すべての画像にalt属性が設定されている（${page.images}件）`)
-  return items
+const siteDiagnostics: DiagnosticRow[] = [
+  {
+    item: 'robots.txt',
+    evaluation: robotsStatus === 200 ? '良好' : '要確認',
+    detail: robotsStatus === 200 ? '正常に取得できる' : `取得結果: ${robotsStatus ?? '取得不能'}`,
+  },
+  {
+    item: 'XMLサイトマップ',
+    evaluation: sitemapUrls.size > 0 ? '良好' : '要確認',
+    detail: sitemapUrls.size > 0 ? `${sitemapUrls.size}件のURLを確認` : 'URLを確認できない',
+  },
+]
+if (missingFromCrawl.length > 0) {
+  siteDiagnostics.push({
+    item: 'サイトマップ巡回',
+    evaluation: '要改善',
+    detail: `${missingFromCrawl.length}件を巡回できなかった`,
+  })
 }
 
-const resultUrls = new Set(results.map((page) => page.url))
-const pageSections = results.map((page) => {
-  const good = pageStrengths(page)
-  const problems = findings.filter((finding) => finding.url === page.url)
-  return `### \`${page.url}\`
+function pageDiagnostics(page: PageResult): DiagnosticRow[] {
+  if (page.error || page.status === null) {
+    return [{ item: 'ページ取得', evaluation: '取得不能', detail: page.error ?? 'HTTPステータスを取得できない' }]
+  }
 
-- Title: ${page.title || '未設定'}
-- Status: ${page.status ?? '取得不能'}
-
-#### 良い点
-
-${good.length > 0 ? good.map((item) => `- ${item}`).join('\n') : '- 機械的に確認できる良い点はありませんでした。'}
-
-#### 問題点
-
-${problems.length > 0 ? problems.map((item) => `- **${item.severity}**: ${item.issue}`).join('\n') : '- 問題は見つかりませんでした。'}`
-}).join('\n\n')
-
-const otherFindings = findings.filter((finding) => !resultUrls.has(finding.url))
-
-const counts = {
-  high: findings.filter((item) => item.severity === '高').length,
-  medium: findings.filter((item) => item.severity === '中').length,
-  low: findings.filter((item) => item.severity === '低').length,
+  const titleIssue = findings.find((finding) => finding.url === page.url && finding.issue.startsWith('titleが'))
+  const descriptionIssue = findings.find((finding) => finding.url === page.url && finding.issue.startsWith('descriptionが'))
+  const rows: DiagnosticRow[] = [
+    {
+      item: 'HTTPステータス',
+      evaluation: page.status < 400 ? '良好' : '要改善',
+      detail: page.finalUrl === page.url ? String(page.status) : `${page.status}（${page.finalUrl}へ移動）`,
+    },
+    {
+      item: 'title',
+      evaluation: page.title && !titleIssue ? '良好' : '要改善',
+      detail: titleIssue?.issue ?? (page.title || '未設定'),
+    },
+    {
+      item: 'meta description',
+      evaluation: page.description && !descriptionIssue ? '良好' : '要改善',
+      detail: descriptionIssue?.issue ?? (page.description || '未設定'),
+    },
+    {
+      item: 'H1',
+      evaluation: page.h1s.length === 1 ? '良好' : '要改善',
+      detail: page.h1s.length === 1 ? '1個' : `${page.h1s.length}個`,
+    },
+    {
+      item: 'canonical',
+      evaluation: page.canonical && sameSite(page.canonical) ? '良好' : '要改善',
+      detail: page.canonical || '未設定',
+    },
+    {
+      item: 'lang属性',
+      evaluation: page.lang ? '良好' : '要確認',
+      detail: page.lang || '未設定',
+    },
+    {
+      item: 'インデックス設定',
+      evaluation: /\bnoindex\b/i.test(page.robots) ? '要確認' : '良好',
+      detail: /\bnoindex\b/i.test(page.robots) ? `noindex指定あり（${page.robots}）` : 'noindex指定なし',
+    },
+    {
+      item: '本文',
+      evaluation: page.textLength >= 200 ? '良好' : '要改善',
+      detail: `${page.textLength}文字`,
+    },
+    {
+      item: '画像alt',
+      evaluation: page.imagesWithoutAlt === 0 ? '良好' : '要改善',
+      detail: page.images === 0 ? '対象画像なし' : `${page.images}件中${page.imagesWithoutAlt}件でalt属性なし`,
+    },
+  ]
+  return rows
 }
+
+const pageDiagnosticSets = results.map((page) => ({ page, rows: pageDiagnostics(page) }))
+const allDiagnostics = [...siteDiagnostics, ...pageDiagnosticSets.flatMap(({ rows }) => rows)]
+const evaluationCounts = Object.fromEntries(
+  (['良好', '要確認', '要改善', '取得不能'] as Evaluation[]).map((evaluation) => [
+    evaluation,
+    allDiagnostics.filter((row) => row.evaluation === evaluation).length,
+  ]),
+) as Record<Evaluation, number>
+
+const diagnosticTable = (rows: DiagnosticRow[]) => `| 診断項目 | 評価 | 詳細 |
+|---|---|---|
+${rows.map((row) => `| ${escapeCell(row.item)} | **${row.evaluation}** | ${escapeCell(row.detail)} |`).join('\n')}`
+
+const pageSections = pageDiagnosticSets.map(({ page, rows }) => `### \`${page.url}\`
+
+${diagnosticTable(rows)}`).join('\n\n')
 const generatedAt = new Date().toISOString()
 const report = `# SEO診断レポート
 
@@ -508,27 +561,21 @@ const report = `# SEO診断レポート
 - 発見URL数: ${queued.size}
 - サイトマップ掲載URL数: ${sitemapUrls.size}
 - robots.txt: ${robotsStatus ?? '取得不能'}
-- 問題: 高 ${counts.high}件 / 中 ${counts.medium}件 / 低 ${counts.low}件
+- 評価: 良好 ${evaluationCounts['良好']}件 / 要確認 ${evaluationCounts['要確認']}件 / 要改善 ${evaluationCounts['要改善']}件 / 取得不能 ${evaluationCounts['取得不能']}件
 
-## サイト全体の良い点
+## サイト全体の診断
 
-${siteStrengths.length === 0 ? '機械的に確認できる良い点は見つかりませんでした。' : siteStrengths.map((item) => `- ${item}`).join('\n')}
+${diagnosticTable(siteDiagnostics)}
 
 ## ページ別診断
 
 ${pageSections}
 
-${otherFindings.length > 0 ? `## その他の問題
-
-| 優先度 | URL | 問題 |
-|---|---|---|
-${otherFindings.map((item) => `| ${item.severity} | ${escapeCell(item.url)} | ${escapeCell(item.issue)} |`).join('\n')}
-
-` : ''}## 判定について
+## 判定について
 
 このレポートは機械的に確認できる技術項目を診断したものです。検索順位の保証や、コンテンツ品質の最終判断を行うものではありません。
 `
 
 writeFileSync(outputPath, report, 'utf8')
 console.log(`診断完了: ${outputPath}`)
-console.log(`問題: 高 ${counts.high}件 / 中 ${counts.medium}件 / 低 ${counts.low}件`)
+console.log(`評価: 良好 ${evaluationCounts['良好']}件 / 要確認 ${evaluationCounts['要確認']}件 / 要改善 ${evaluationCounts['要改善']}件 / 取得不能 ${evaluationCounts['取得不能']}件`)
