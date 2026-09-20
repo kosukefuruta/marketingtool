@@ -11,6 +11,7 @@ Owtellは、URLを入力して技術SEO上の問題を診断し、将来的にSE
 - 有料機能要件: `docs/paid-feature-requirements.md`
 - Phase 1計画: `docs/phase1-auth-site-billing-plan.md`
 - Koyeb設定: `docs/koyeb-deployment-checklist.md`
+- 外部SEOデータAPI: `docs/dataforseo-research.md`
 - 次回の実機テスト: `docs/next-session-handoff.md`
 
 ## 技術構成
