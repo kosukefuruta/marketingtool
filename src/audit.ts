@@ -177,10 +177,10 @@ async function loadSitemaps(robotsText: string): Promise<Set<string>> {
 async function inspectPage(page: Page, url: string): Promise<PageResult> {
   try {
     const response = await page.goto(url, { waitUntil: 'commit', timeout: 12_000 })
-    await page.waitForLoadState('domcontentloaded', { timeout: 3_000 }).catch(() => {})
+    await page.waitForLoadState('domcontentloaded', { timeout: 1_500 }).catch(() => {})
     // DOMContentLoaded後に短く待ち、一般的なクライアント描画を取り込む。
     // networkidle待ちは広告や計測通信のあるページで毎回タイムアウトし、巡回を大幅に遅くするため使わない。
-    await page.waitForTimeout(500)
+    await page.waitForTimeout(300)
     const data = await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]')).map((link) => link.href)
       const images = Array.from(document.querySelectorAll<HTMLImageElement>('img'))
@@ -280,6 +280,7 @@ const initialUrl = normalizeUrl(startUrl.href)!
 const queue = [...new Set([initialUrl, ...sitemapUrls])]
 const queued = new Set(queue)
 const results: PageResult[] = []
+const concurrency = 3
 
 const browser = await chromium.launch()
 try {
@@ -304,16 +305,22 @@ try {
     }
   })
   while (queue.length > 0 && results.length < maxPages) {
-    const url = queue.shift()!
-    console.log(`[${results.length + 1}/${maxPages}] ${url}`)
-    const result = await inspectPageWithin(context, url, 8_000)
-    results.push(result)
+    const batchSize = Math.min(concurrency, maxPages - results.length, queue.length)
+    const batch = queue.splice(0, batchSize)
+    const offset = results.length
+    for (const [index, url] of batch.entries()) {
+      console.log(`[${offset + index + 1}/${maxPages}] ${url}`)
+    }
+    const batchResults = await Promise.all(batch.map((url) => inspectPageWithin(context, url, 5_000)))
+    results.push(...batchResults)
 
-    for (const link of result.links) {
-      const normalized = normalizeUrl(link, result.finalUrl)
-      if (!normalized || !sameSite(normalized) || !isCrawlablePage(normalized) || queued.has(normalized)) continue
-      queued.add(normalized)
-      queue.push(normalized)
+    for (const result of batchResults) {
+      for (const link of result.links) {
+        const normalized = normalizeUrl(link, result.finalUrl)
+        if (!normalized || !sameSite(normalized) || !isCrawlablePage(normalized) || queued.has(normalized)) continue
+        queued.add(normalized)
+        queue.push(normalized)
+      }
     }
   }
 } finally {
