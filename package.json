@@ -1,0 +1,21 @@
+{
+  "name": "marketingtool",
+  "private": true,
+  "description": "URLを入力して技術SEO上の問題を診断するCLIツール",
+  "type": "module",
+  "scripts": {
+    "seo:audit": "tsx src/audit.ts",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
