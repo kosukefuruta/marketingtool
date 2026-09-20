@@ -32,7 +32,13 @@ function page(message = ''): string {
     button { cursor: pointer; }
     .message { color: #b42318; }
     #result { margin-top: 32px; }
-    pre { max-height: 70vh; overflow: auto; padding: 16px; border: 1px solid #8886; border-radius: 8px; white-space: pre-wrap; }
+    [hidden] { display: none !important; }
+    .report { margin-top: 20px; }
+    .report h1, .report h2, .report h3 { margin-top: 1.5em; }
+    .report table { width: 100%; border-collapse: collapse; margin: 12px 0 28px; }
+    .report th, .report td { padding: 10px; border: 1px solid #8886; text-align: left; vertical-align: top; }
+    .report th { background: #8882; }
+    .report code { padding: 2px 5px; border-radius: 4px; background: #8882; overflow-wrap: anywhere; }
   </style>
 </head>
 <body>
@@ -52,7 +58,7 @@ function page(message = ''): string {
     <h2 id="result-title">診断中です</h2>
     <p id="result-status">この画面を開いたままお待ちください。</p>
     <p><a id="report-link" hidden>Markdownレポートを表示</a></p>
-    <pre id="report" hidden></pre>
+    <div id="report" class="report" hidden></div>
   </section>
   <script>
     const form = document.querySelector('#audit-form')
@@ -64,6 +70,110 @@ function page(message = ''): string {
     const report = document.querySelector('#report')
 
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+    const appendInline = (element, value) => {
+      const text = value.replaceAll(String.fromCharCode(92) + '|', '|')
+      const pattern = /([*][*][^*]+[*][*]|\x60[^\x60]+\x60)/g
+      let offset = 0
+      for (const match of text.matchAll(pattern)) {
+        element.append(document.createTextNode(text.slice(offset, match.index)))
+        const token = match[0]
+        const child = document.createElement(token.startsWith('**') ? 'strong' : 'code')
+        child.textContent = token.startsWith('**') ? token.slice(2, -2) : token.slice(1, -1)
+        element.append(child)
+        offset = match.index + token.length
+      }
+      element.append(document.createTextNode(text.slice(offset)))
+    }
+
+    const tableCells = (line) => {
+      const cells = []
+      let cell = ''
+      let escaped = false
+      for (const character of line.trim().slice(1, -1)) {
+        if (character === '|' && !escaped) {
+          cells.push(cell.trim())
+          cell = ''
+        } else {
+          cell += character
+        }
+        escaped = character === String.fromCharCode(92) && !escaped
+      }
+      cells.push(cell.trim())
+      return cells
+    }
+
+    const isTableSeparator = (line) => {
+      const trimmed = line?.trim() || ''
+      return trimmed.startsWith('|') && tableCells(trimmed).every((cell) => /^:?-+:?$/.test(cell))
+    }
+
+    const renderMarkdown = (markdown, container) => {
+      container.replaceChildren()
+      const lines = markdown.split(String.fromCharCode(10)).map((line) => line.replaceAll(String.fromCharCode(13), ''))
+      let index = 0
+      while (index < lines.length) {
+        const line = lines[index]
+        if (!line.trim()) {
+          index++
+          continue
+        }
+
+        const heading = line.match(/^(#{1,3})[ ]+(.+)$/)
+        if (heading) {
+          const element = document.createElement('h' + heading[1].length)
+          appendInline(element, heading[2])
+          container.append(element)
+          index++
+          continue
+        }
+
+        if (line.trim().startsWith('|') && isTableSeparator(lines[index + 1])) {
+          const table = document.createElement('table')
+          const thead = document.createElement('thead')
+          const headRow = document.createElement('tr')
+          for (const value of tableCells(line)) {
+            const cell = document.createElement('th')
+            appendInline(cell, value)
+            headRow.append(cell)
+          }
+          thead.append(headRow)
+          table.append(thead)
+          index += 2
+          const tbody = document.createElement('tbody')
+          while (index < lines.length && lines[index].trim().startsWith('|')) {
+            const row = document.createElement('tr')
+            for (const value of tableCells(lines[index])) {
+              const cell = document.createElement('td')
+              appendInline(cell, value)
+              row.append(cell)
+            }
+            tbody.append(row)
+            index++
+          }
+          table.append(tbody)
+          container.append(table)
+          continue
+        }
+
+        if (line.startsWith('- ')) {
+          const list = document.createElement('ul')
+          while (index < lines.length && lines[index].startsWith('- ')) {
+            const item = document.createElement('li')
+            appendInline(item, lines[index].slice(2))
+            list.append(item)
+            index++
+          }
+          container.append(list)
+          continue
+        }
+
+        const paragraph = document.createElement('p')
+        appendInline(paragraph, line)
+        container.append(paragraph)
+        index++
+      }
+    }
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault()
@@ -97,7 +207,7 @@ function page(message = ''): string {
 
           const reportResponse = await fetch(job.reportUrl, { cache: 'no-store' })
           if (!reportResponse.ok) throw new Error('レポートを取得できませんでした。')
-          report.textContent = await reportResponse.text()
+          renderMarkdown(await reportResponse.text(), report)
           report.hidden = false
           reportLink.href = job.reportUrl
           reportLink.hidden = false
