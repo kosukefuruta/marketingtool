@@ -256,6 +256,92 @@ async function inspectPageWithin(context: BrowserContext, url: string, timeoutMs
   }
 }
 
+function decodeHtml(value: string): string {
+  return value
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replaceAll('&nbsp;', ' ')
+    .replaceAll('&amp;', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#39;', "'")
+}
+
+function attribute(tag: string, name: string): string {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = tag.match(new RegExp(`(?:^|\\s)${escaped}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i'))
+  return decodeHtml(match?.[1] ?? match?.[2] ?? match?.[3] ?? '')
+}
+
+function plainText(html: string): string {
+  return decodeHtml(html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
+}
+
+async function inspectHttp(url: string): Promise<PageResult> {
+  try {
+    const response = await safeFetch(url)
+    const html = await response.text()
+    const contentType = response.headers.get('content-type') ?? ''
+    if (!contentType.includes('text/html') && !/^\s*<!doctype|^\s*<html/i.test(html)) {
+      throw new Error(`HTMLではないレスポンス: ${contentType || 'content-type不明'}`)
+    }
+
+    const title = plainText(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? '')
+    const h1s = [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)].map((match) => plainText(match[1])).filter(Boolean)
+    const metas = [...html.matchAll(/<meta\b[^>]*>/gi)].map((match) => match[0])
+    const links = [...html.matchAll(/<a\b[^>]*>/gi)]
+      .map((match) => attribute(match[0], 'href'))
+      .map((href) => normalizeUrl(href, response.url))
+      .filter((href): href is string => Boolean(href))
+    const linkTags = [...html.matchAll(/<link\b[^>]*>/gi)].map((match) => match[0])
+    const images = [...html.matchAll(/<img\b[^>]*>/gi)].map((match) => match[0])
+    const body = html
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ')
+
+    return {
+      url,
+      finalUrl: response.url || url,
+      status: response.status,
+      title,
+      description: attribute(metas.find((tag) => attribute(tag, 'name').toLowerCase() === 'description') ?? '', 'content'),
+      h1s,
+      canonical: attribute(linkTags.find((tag) => attribute(tag, 'rel').toLowerCase().split(/\s+/).includes('canonical')) ?? '', 'href'),
+      robots: attribute(metas.find((tag) => attribute(tag, 'name').toLowerCase() === 'robots') ?? '', 'content'),
+      lang: attribute(html.match(/<html\b[^>]*>/i)?.[0] ?? '', 'lang'),
+      textLength: plainText(body).length,
+      links,
+      images: images.length,
+      imagesWithoutAlt: images.filter((tag) => !/(?:^|\s)alt\s*=/i.test(tag)).length,
+    }
+  } catch (error) {
+    return {
+      url,
+      finalUrl: url,
+      status: null,
+      title: '',
+      description: '',
+      h1s: [],
+      canonical: '',
+      robots: '',
+      lang: '',
+      textLength: 0,
+      links: [],
+      images: 0,
+      imagesWithoutAlt: 0,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+async function inspectUrl(context: BrowserContext, url: string): Promise<PageResult> {
+  const httpResult = await inspectHttp(url)
+  if (!httpResult.error && (httpResult.textLength >= 200 || (httpResult.status ?? 0) >= 400)) return httpResult
+  return inspectPageWithin(context, url, 5_000)
+}
+
 function escapeCell(value: string): string {
   return value.replaceAll('|', '\\|').replaceAll('\n', ' ')
 }
@@ -311,7 +397,7 @@ try {
     for (const [index, url] of batch.entries()) {
       console.log(`[${offset + index + 1}/${maxPages}] ${url}`)
     }
-    const batchResults = await Promise.all(batch.map((url) => inspectPageWithin(context, url, 5_000)))
+    const batchResults = await Promise.all(batch.map((url) => inspectUrl(context, url)))
     results.push(...batchResults)
 
     for (const result of batchResults) {
