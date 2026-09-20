@@ -8,6 +8,13 @@ import { tmpdir } from 'node:os'
 const port = Number(process.env.PORT ?? 8000)
 const host = '0.0.0.0'
 let auditing = false
+type Job = {
+  status: 'running' | 'done' | 'error'
+  createdAt: number
+  report?: string
+  error?: string
+}
+const jobs = new Map<string, Job>()
 
 function page(message = ''): string {
   return `<!doctype html>
@@ -40,6 +47,20 @@ function page(message = ''): string {
   </form>
 </body>
 </html>`
+}
+
+function escapeHtml(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+}
+
+function jobPage(id: string, job: Job): string {
+  if (job.status === 'running') {
+    return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="3"><title>診断中｜Owtell SEO診断ツール</title></head><body><main><h1>診断中です</h1><p>ページを閉じずにお待ちください。この画面は3秒ごとに更新されます。</p></main></body></html>`
+  }
+  if (job.status === 'error') {
+    return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>診断失敗｜Owtell SEO診断ツール</title></head><body><main><h1>診断に失敗しました</h1><p>${escapeHtml(job.error ?? '不明なエラー')}</p><p><a href="/">戻る</a></p></main></body></html>`
+  }
+  return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>診断完了｜Owtell SEO診断ツール</title></head><body><main><h1>診断が完了しました</h1><p><a href="/jobs/${id}/report">Markdownレポートを表示</a></p><p><a href="/">別のサイトを診断する</a></p></main></body></html>`
 }
 
 function collectBody(request: IncomingMessage): Promise<string> {
@@ -90,6 +111,36 @@ const server = createServer(async (request, response) => {
     return
   }
 
+  const reportMatch = request.method === 'GET' ? request.url?.match(/^\/jobs\/([a-f0-9-]+)\/report$/) : null
+  if (reportMatch) {
+    const job = jobs.get(reportMatch[1])
+    if (!job || job.status !== 'done' || !job.report) {
+      response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+      response.end('レポートが見つかりません。\n')
+      return
+    }
+    response.writeHead(200, {
+      'content-type': 'text/markdown; charset=utf-8',
+      'content-disposition': 'inline; filename="seo-report.md"',
+      'cache-control': 'no-store',
+    })
+    response.end(job.report)
+    return
+  }
+
+  const jobMatch = request.method === 'GET' ? request.url?.match(/^\/jobs\/([a-f0-9-]+)$/) : null
+  if (jobMatch) {
+    const job = jobs.get(jobMatch[1])
+    if (!job) {
+      response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+      response.end('診断ジョブが見つかりません。\n')
+      return
+    }
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+    response.end(jobPage(jobMatch[1], job))
+    return
+  }
+
   if (request.method === 'POST' && request.url === '/audit') {
     if (auditing) {
       response.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'retry-after': '30' })
@@ -97,30 +148,36 @@ const server = createServer(async (request, response) => {
       return
     }
 
-    let output = ''
     try {
       const params = new URLSearchParams(await collectBody(request))
       const url = params.get('url')?.trim() ?? ''
       const max = Number(params.get('max') ?? 100)
       if (!url || !Number.isInteger(max) || max < 1 || max > 300) throw new Error('URLとページ数（1〜300）を正しく入力してください。')
 
-      output = join(tmpdir(), `seo-report-${randomUUID()}.md`)
+      const id = randomUUID()
+      const output = join(tmpdir(), `seo-report-${id}.md`)
+      jobs.set(id, { status: 'running', createdAt: Date.now() })
       auditing = true
-      await runAudit(url, max, output)
-      const report = await readFile(output, 'utf8')
-      response.writeHead(200, {
-        'content-type': 'text/markdown; charset=utf-8',
-        'content-disposition': 'inline; filename="seo-report.md"',
-        'cache-control': 'no-store',
+      void runAudit(url, max, output).then(async () => {
+        const report = await readFile(output, 'utf8')
+        jobs.set(id, { status: 'done', createdAt: Date.now(), report })
+      }).catch((error: unknown) => {
+        jobs.set(id, {
+          status: 'error',
+          createdAt: Date.now(),
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }).finally(async () => {
+        auditing = false
+        await unlink(output).catch(() => {})
       })
-      response.end(report)
+
+      response.writeHead(303, { location: `/jobs/${id}`, 'cache-control': 'no-store' })
+      response.end()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       response.writeHead(400, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
       response.end(page(message))
-    } finally {
-      auditing = false
-      if (output) await unlink(output).catch(() => {})
     }
     return
   }
@@ -132,3 +189,10 @@ const server = createServer(async (request, response) => {
 server.listen(port, host, () => {
   console.log(`SEO診断ツール: http://${host}:${port}`)
 })
+
+setInterval(() => {
+  const expiresBefore = Date.now() - 60 * 60 * 1000
+  for (const [id, job] of jobs) {
+    if (job.createdAt < expiresBefore) jobs.delete(id)
+  }
+}, 10 * 60 * 1000).unref()
