@@ -1,5 +1,5 @@
 import type Stripe from "stripe"
-import { eq } from "drizzle-orm"
+import { and, eq, lt, or } from "drizzle-orm"
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { site, stripeWebhookEvent, subscription } from "@/lib/db/schema"
@@ -22,6 +22,23 @@ async function subscriptionFromEvent(event: Stripe.Event): Promise<{ value: Stri
   return null
 }
 
+// A claim older than this belongs to a request whose process died before it could finish.
+const ABANDONED_PROCESSING_MS = 5 * 60 * 1000
+
+async function markFailed(eventId: string, status: "failed" | "ignored", reason: string): Promise<void> {
+  await db.update(stripeWebhookEvent).set({ status, lastError: reason.slice(0, 300) })
+    .where(eq(stripeWebhookEvent.stripeEventId, eventId))
+}
+
+async function rejectEvent(event: Stripe.Event, reason: "ownership_mismatch" | "unexpected_price"): Promise<NextResponse> {
+  if (reason === "unexpected_price") {
+    await markFailed(event.id, "ignored", reason)
+    return NextResponse.json({ received: true, ignored: true })
+  }
+  await markFailed(event.id, "failed", reason)
+  return NextResponse.json({ error: reason }, { status: 500 })
+}
+
 export async function POST(request: Request) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET
   const signature = request.headers.get("stripe-signature")
@@ -34,36 +51,46 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 })
   }
 
-  const inserted = await db.insert(stripeWebhookEvent).values({
+  const now = new Date()
+  const claimed = await db.insert(stripeWebhookEvent).values({
     stripeEventId: event.id,
     eventType: event.type,
     status: "processing",
-    receivedAt: new Date(),
-  }).onConflictDoNothing().returning({ id: stripeWebhookEvent.stripeEventId })
-  if (inserted.length === 0) return NextResponse.json({ received: true, deduped: true })
+    receivedAt: now,
+  }).onConflictDoUpdate({
+    target: stripeWebhookEvent.stripeEventId,
+    set: { status: "processing", receivedAt: now, processedAt: null, lastError: null },
+    setWhere: or(
+      eq(stripeWebhookEvent.status, "failed"),
+      and(
+        eq(stripeWebhookEvent.status, "processing"),
+        lt(stripeWebhookEvent.receivedAt, new Date(now.getTime() - ABANDONED_PROCESSING_MS)),
+      ),
+    ),
+  }).returning({ id: stripeWebhookEvent.stripeEventId })
+  if (claimed.length === 0) return NextResponse.json({ received: true, deduped: true })
 
   try {
     const resolved = await subscriptionFromEvent(event)
     if (resolved) {
-      const applied = await syncStripeSubscription(resolved.value, resolved.userId)
-      if (applied) {
-        const [row] = await db.select({ userId: subscription.userId, status: subscription.status, grace: subscription.gracePeriodEndsAt })
-          .from(subscription).where(eq(subscription.stripeSubscriptionId, resolved.value.id)).limit(1)
-        if (row) {
-          await db.update(site).set({
-            status: hasPaidAccess(row.status, row.grace) ? "active" : "pending",
-            updatedAt: new Date(),
-          }).where(eq(site.userId, row.userId))
-        }
+      const result = await syncStripeSubscription(resolved.value, resolved.userId)
+      if (!result.applied) return await rejectEvent(event, result.reason)
+      const [row] = await db.select({ userId: subscription.userId, status: subscription.status, grace: subscription.gracePeriodEndsAt })
+        .from(subscription).where(eq(subscription.stripeSubscriptionId, resolved.value.id)).limit(1)
+      if (row) {
+        await db.update(site).set({
+          status: hasPaidAccess(row.status, row.grace) ? "active" : "pending",
+          updatedAt: new Date(),
+        }).where(eq(site.userId, row.userId))
       }
     }
-    await db.update(stripeWebhookEvent).set({ status: "processed", processedAt: new Date() })
+    await db.update(stripeWebhookEvent).set({ status: "processed", processedAt: new Date(), lastError: null })
       .where(eq(stripeWebhookEvent.stripeEventId, event.id))
     return NextResponse.json({ received: true })
   } catch (error) {
-    const message = error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300)
+    const message = error instanceof Error ? error.message : String(error)
     console.error("[stripe-webhook] processing failed", { eventId: event.id, type: event.type, message })
-    await db.delete(stripeWebhookEvent).where(eq(stripeWebhookEvent.stripeEventId, event.id))
+    await markFailed(event.id, "failed", message)
     return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 })
   }
 }

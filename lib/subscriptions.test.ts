@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { blocksNewCheckout, gracePeriodForStatus, hasPaidAccess, PAYMENT_GRACE_PERIOD_MS } from "./subscription-access"
+import { blocksNewCheckout, gracePeriodForStatus, hasPaidAccess, PAYMENT_GRACE_PERIOD_MS, storedSubscriptionStatus } from "./subscription-access"
 
 describe("subscription access", () => {
   const now = new Date("2026-09-20T00:00:00.000Z")
@@ -35,6 +35,30 @@ describe("payment grace period", () => {
 
   it("clears the grace period after leaving past_due", () => {
     expect(gracePeriodForStatus("active", new Date("2026-09-24T00:00:00.000Z"), now)).toBeNull()
+  })
+})
+
+describe("stored subscription status", () => {
+  const now = new Date("2026-09-20T00:00:00.000Z")
+
+  it.each(["active", "trialing"])("marks a scheduled cancellation of %s as canceling", (status) => {
+    expect(storedSubscriptionStatus(status, true)).toBe("canceling")
+  })
+
+  it.each(["past_due", "canceled", "unpaid", "incomplete"])("keeps %s even with a scheduled cancellation", (status) => {
+    expect(storedSubscriptionStatus(status, true)).toBe(status)
+  })
+
+  it("keeps the payment grace period authoritative for a canceling past_due subscription", () => {
+    const stored = storedSubscriptionStatus("past_due", true)
+    const grace = gracePeriodForStatus("past_due", null, now)
+    const afterGrace = new Date(now.getTime() + PAYMENT_GRACE_PERIOD_MS + 1)
+    expect(hasPaidAccess(stored, grace, now)).toBe(true)
+    expect(hasPaidAccess(stored, grace, afterGrace)).toBe(false)
+  })
+
+  it("leaves the status untouched without a scheduled cancellation", () => {
+    expect(storedSubscriptionStatus("active", false)).toBe("active")
   })
 })
 
