@@ -456,34 +456,43 @@ for (const url of missingFromCrawl) findings.push({ severity: '中', url, issue:
 const severityOrder = { 高: 0, 中: 1, 低: 2 }
 findings.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity] || a.url.localeCompare(b.url))
 
-const strengths: string[] = []
-const validPages = results.filter((page) => !page.error && page.status !== null && page.status < 400)
-const validCount = validPages.length
-const strengthCount = (predicate: (page: PageResult) => boolean) => validPages.filter(predicate).length
-const addCoverage = (label: string, predicate: (page: PageResult) => boolean) => {
-  const count = strengthCount(predicate)
-  if (count > 0) strengths.push(`${count}/${validCount}ページで${label}`)
+const siteStrengths: string[] = []
+if (robotsStatus === 200) siteStrengths.push('robots.txtを正常に取得できる')
+if (sitemapUrls.size > 0) siteStrengths.push(`XMLサイトマップから${sitemapUrls.size}件のURLを確認できる`)
+
+function pageStrengths(page: PageResult): string[] {
+  if (page.error || page.status === null || page.status >= 400) return []
+  const items = [`HTTP ${page.status}で正常に取得できる`]
+  if (page.title) items.push('titleが設定されている')
+  if (page.description) items.push('meta descriptionが設定されている')
+  if (page.h1s.length === 1) items.push('H1が1つに整理されている')
+  if (page.canonical && sameSite(page.canonical)) items.push('同一サイト内のcanonicalが設定されている')
+  if (page.lang) items.push(`html要素にlang属性（${page.lang}）が設定されている`)
+  if (!/\bnoindex\b/i.test(page.robots)) items.push('noindexが指定されていない')
+  if (page.textLength >= 200) items.push(`十分な可視テキストを取得できる（${page.textLength}文字）`)
+  if (page.images > 0 && page.imagesWithoutAlt === 0) items.push(`すべての画像にalt属性が設定されている（${page.images}件）`)
+  return items
 }
 
-if (robotsStatus === 200) strengths.push('robots.txtを正常に取得できる')
-if (sitemapUrls.size > 0) strengths.push(`XMLサイトマップから${sitemapUrls.size}件のURLを確認できる`)
-if (validCount > 0) strengths.push(`${validCount}/${results.length}ページをHTTPエラーなく取得できる`)
-addCoverage('titleが設定されている', (page) => Boolean(page.title))
-const titledPages = validPages.filter((page) => page.title)
-if (titledPages.length > 0 && new Set(titledPages.map((page) => page.title)).size === titledPages.length) {
-  strengths.push(`titleが設定された${titledPages.length}ページすべてで内容が重複していない`)
-}
-addCoverage('meta descriptionが設定されている', (page) => Boolean(page.description))
-addCoverage('H1が1つに整理されている', (page) => page.h1s.length === 1)
-addCoverage('同一サイト内のcanonicalが設定されている', (page) => Boolean(page.canonical) && sameSite(page.canonical))
-addCoverage('html要素にlang属性が設定されている', (page) => Boolean(page.lang))
-addCoverage('noindexが指定されていない', (page) => !/\bnoindex\b/i.test(page.robots))
-addCoverage('十分な可視テキストを取得できる', (page) => page.textLength >= 200)
-const pagesWithImages = validPages.filter((page) => page.images > 0)
-if (pagesWithImages.length > 0) {
-  const completeAltPages = pagesWithImages.filter((page) => page.imagesWithoutAlt === 0).length
-  if (completeAltPages > 0) strengths.push(`${completeAltPages}/${pagesWithImages.length}ページで全画像にalt属性が設定されている`)
-}
+const resultUrls = new Set(results.map((page) => page.url))
+const pageSections = results.map((page) => {
+  const good = pageStrengths(page)
+  const problems = findings.filter((finding) => finding.url === page.url)
+  return `### \`${page.url}\`
+
+- Title: ${page.title || '未設定'}
+- Status: ${page.status ?? '取得不能'}
+
+#### 良い点
+
+${good.length > 0 ? good.map((item) => `- ${item}`).join('\n') : '- 機械的に確認できる良い点はありませんでした。'}
+
+#### 問題点
+
+${problems.length > 0 ? problems.map((item) => `- **${item.severity}**: ${item.issue}`).join('\n') : '- 問題は見つかりませんでした。'}`
+}).join('\n\n')
+
+const otherFindings = findings.filter((finding) => !resultUrls.has(finding.url))
 
 const counts = {
   high: findings.filter((item) => item.severity === '高').length,
@@ -501,21 +510,21 @@ const report = `# SEO診断レポート
 - robots.txt: ${robotsStatus ?? '取得不能'}
 - 問題: 高 ${counts.high}件 / 中 ${counts.medium}件 / 低 ${counts.low}件
 
-## 良い点
+## サイト全体の良い点
 
-${strengths.length === 0 ? '機械的に確認できる良い点は見つかりませんでした。' : strengths.map((item) => `- ${item}`).join('\n')}
+${siteStrengths.length === 0 ? '機械的に確認できる良い点は見つかりませんでした。' : siteStrengths.map((item) => `- ${item}`).join('\n')}
 
-## 診断結果
+## ページ別診断
 
-${findings.length === 0 ? '問題は見つかりませんでした。' : `| 優先度 | URL | 問題 |\n|---|---|---|\n${findings.map((item) => `| ${item.severity} | ${escapeCell(item.url)} | ${escapeCell(item.issue)} |`).join('\n')}`}
+${pageSections}
 
-## ページ一覧
+${otherFindings.length > 0 ? `## その他の問題
 
-| Status | URL | Title | H1 | 本文文字数 |
-|---:|---|---|---:|---:|
-${results.map((page) => `| ${page.status ?? '-'} | ${escapeCell(page.url)} | ${escapeCell(page.title || '-')} | ${page.h1s.length} | ${page.textLength} |`).join('\n')}
+| 優先度 | URL | 問題 |
+|---|---|---|
+${otherFindings.map((item) => `| ${item.severity} | ${escapeCell(item.url)} | ${escapeCell(item.issue)} |`).join('\n')}
 
-## 判定について
+` : ''}## 判定について
 
 このレポートは機械的に確認できる技術項目を診断したものです。検索順位の保証や、コンテンツ品質の最終判断を行うものではありません。
 `
