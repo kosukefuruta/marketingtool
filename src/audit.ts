@@ -98,16 +98,25 @@ function isPrivateAddress(address: string): boolean {
   return true
 }
 
+const publicHostChecks = new Map<string, Promise<void>>()
+
 async function assertPublicUrl(value: string): Promise<void> {
   const url = new URL(value)
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`許可されていないURL: ${value}`)
   if (url.username || url.password) throw new Error('認証情報を含むURLは指定できません。')
   const hostname = url.hostname.replace(/^\[|\]$/g, '')
   if (hostname === 'localhost' || hostname.endsWith('.localhost')) throw new Error('ローカルアドレスは診断できません。')
-  const addresses = isIP(hostname) ? [{ address: hostname }] : await lookup(hostname, { all: true, verbatim: true })
-  if (addresses.length === 0 || addresses.some(({ address }) => isPrivateAddress(address))) {
-    throw new Error(`プライベートアドレスへのアクセスはできません: ${hostname}`)
+  let check = publicHostChecks.get(hostname)
+  if (!check) {
+    check = (async () => {
+      const addresses = isIP(hostname) ? [{ address: hostname }] : await lookup(hostname, { all: true, verbatim: true })
+      if (addresses.length === 0 || addresses.some(({ address }) => isPrivateAddress(address))) {
+        throw new Error(`プライベートアドレスへのアクセスはできません: ${hostname}`)
+      }
+    })()
+    publicHostChecks.set(hostname, check)
   }
+  await check
 }
 
 async function safeFetch(value: string): Promise<Response> {
@@ -167,7 +176,7 @@ async function loadSitemaps(robotsText: string): Promise<Set<string>> {
 
 async function inspectPage(page: Page, url: string): Promise<PageResult> {
   try {
-    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20_000 })
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12_000 })
     // DOMContentLoaded後に短く待ち、一般的なクライアント描画を取り込む。
     // networkidle待ちは広告や計測通信のあるページで毎回タイムアウトし、巡回を大幅に遅くするため使わない。
     await page.waitForTimeout(500)
@@ -243,8 +252,15 @@ try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   await context.route('**/*', async (route) => {
     try {
-      await assertPublicUrl(route.request().url())
-      if (['image', 'media', 'font'].includes(route.request().resourceType())) {
+      const request = route.request()
+      const requestUrl = request.url()
+      const resourceType = request.resourceType()
+      await assertPublicUrl(requestUrl)
+      if (['image', 'media', 'font'].includes(resourceType)) {
+        await route.abort('blockedbyclient')
+        return
+      }
+      if (resourceType !== 'document' && new URL(requestUrl).origin !== startUrl.origin) {
         await route.abort('blockedbyclient')
         return
       }
