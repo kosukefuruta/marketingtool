@@ -45,14 +45,16 @@ export async function POST(request: Request) {
   try {
     const resolved = await subscriptionFromEvent(event)
     if (resolved) {
-      await syncStripeSubscription(resolved.value, resolved.userId)
-      const [row] = await db.select({ userId: subscription.userId, status: subscription.status, grace: subscription.gracePeriodEndsAt })
-        .from(subscription).where(eq(subscription.stripeSubscriptionId, resolved.value.id)).limit(1)
-      if (row) {
-        await db.update(site).set({
-          status: hasPaidAccess(row.status, row.grace) ? "active" : "pending",
-          updatedAt: new Date(),
-        }).where(eq(site.userId, row.userId))
+      const applied = await syncStripeSubscription(resolved.value, resolved.userId)
+      if (applied) {
+        const [row] = await db.select({ userId: subscription.userId, status: subscription.status, grace: subscription.gracePeriodEndsAt })
+          .from(subscription).where(eq(subscription.stripeSubscriptionId, resolved.value.id)).limit(1)
+        if (row) {
+          await db.update(site).set({
+            status: hasPaidAccess(row.status, row.grace) ? "active" : "pending",
+            updatedAt: new Date(),
+          }).where(eq(site.userId, row.userId))
+        }
       }
     }
     await db.update(stripeWebhookEvent).set({ status: "processed", processedAt: new Date() })

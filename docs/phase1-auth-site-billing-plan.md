@@ -270,12 +270,12 @@ Event IDの一意制約でWebhookの二重処理を防ぐ。
 
 ### 9.3 メール
 
-複数プロジェクトで共有している既存の本番Amazon SES環境を利用する。送信元候補は`Owtell <no-reply@owtell.com>`とし、既存SES環境と同じAWSリージョンを使用する。
+複数プロジェクトで共有している既存の本番Amazon SES環境を利用する。送信元は`Owtell <support@tool.owtell.com>`とし、既存SES環境と同じAWSリージョンを使用する。
 
 SESの準備では次を行う。
 
 - 既存SESアカウントと利用リージョンが本番アクセス済みであることを確認する
-- `owtell.com`または使用するサブドメインが同じリージョンのSES Identityとして検証済みか確認する
+- `tool.owtell.com`が同じリージョンのSES Identityとして検証済みか確認する
 - 未登録の場合だけ、共有環境に影響しない形でEasy DKIM用のDNSレコード、SPF、DMARCを設定する
 - Owtell専用のConfiguration Setを作り、送信を他プロジェクトと識別できるようにする
 - メールへOwtell用のメッセージタグを付与する
@@ -362,7 +362,7 @@ STRIPE_PRICE_ID
 - Neon PostgreSQLを作成する
 - StripeのProduct、Price、Customer Portalをテスト環境へ作成する
 - 既存の本番Amazon SESについて、AWSアカウント、リージョン、送信上限、本番アクセス状態を確認する
-- `owtell.com`のIdentity、DKIM、SPF、DMARCの状態を確認し、不足分だけ設定する
+- `tool.owtell.com`のIdentity、DKIM、SPF、DMARCの状態を確認し、不足分だけ設定する
 - Owtell専用のConfiguration Setとメッセージタグを用意する
 - Owtell専用の最小権限IAMユーザーまたはアクセスキーを作成する
 - 開発、テスト、本番の環境変数一覧を用意する
@@ -525,7 +525,7 @@ STRIPE_PRICE_ID
 | 無料試用 | なし |
 | 認証方式 | Linbyと同じメールOTP。Googleログインは後日 |
 | DB | Neon LaunchのPostgreSQL。Koyebアプリと同一または近接地域 |
-| メール | 既存の本番Amazon SES、`no-reply@owtell.com`、Owtell専用Configuration Set |
+| メール | 既存の本番Amazon SES、`support@tool.owtell.com`、Owtell専用Configuration Set |
 | 解約 | 期間終了時のみ |
 | 支払い失敗猶予 | 7日 |
 | サイト所有確認 | Phase 2のSearch Console連携時 |

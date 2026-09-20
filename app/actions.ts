@@ -7,7 +7,7 @@ import { site, subscription, user } from "@/lib/db/schema"
 import { requireSession } from "@/lib/session"
 import { defaultSiteName, normalizePublicSiteUrl } from "@/lib/sites"
 import { getStripe } from "@/lib/stripe"
-import { hasPaidAccess } from "@/lib/subscriptions"
+import { blocksNewCheckout } from "@/lib/subscription-access"
 
 export async function saveSite(formData: FormData): Promise<void> {
   const current = await requireSession()
@@ -59,7 +59,7 @@ export async function startCheckout(): Promise<void> {
   if (!registeredSite) redirect("/onboarding/site")
 
   const [currentSubscription] = await db.select().from(subscription).where(eq(subscription.userId, current.user.id)).limit(1)
-  if (currentSubscription && hasPaidAccess(currentSubscription.status, currentSubscription.gracePeriodEndsAt)) redirect("/dashboard")
+  if (blocksNewCheckout(currentSubscription?.status)) redirect("/dashboard")
 
   const priceId = process.env.STRIPE_PRICE_ID
   const baseUrl = process.env.APP_BASE_URL ?? process.env.BETTER_AUTH_URL
