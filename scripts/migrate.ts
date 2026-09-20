@@ -1,5 +1,9 @@
 import { migrate } from "drizzle-orm/postgres-js/migrator"
-import { db } from "../lib/db/index.js"
+import { closeDatabase, db } from "../lib/db/index.js"
 
-await migrate(db, { migrationsFolder: "./drizzle" })
-console.log("Database migrations completed")
+try {
+  await migrate(db, { migrationsFolder: "./drizzle" })
+  console.log("Database migrations completed")
+} finally {
+  await closeDatabase()
+}
