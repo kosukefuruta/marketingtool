@@ -296,6 +296,7 @@ async function inspectHttp(url: string): Promise<PageResult> {
       .filter((href): href is string => Boolean(href))
     const linkTags = [...html.matchAll(/<link\b[^>]*>/gi)].map((match) => match[0])
     const images = [...html.matchAll(/<img\b[^>]*>/gi)].map((match) => match[0])
+    const canonicalValue = attribute(linkTags.find((tag) => attribute(tag, 'rel').toLowerCase().split(/\s+/).includes('canonical')) ?? '', 'href')
     const body = html
       .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
       .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
@@ -308,7 +309,7 @@ async function inspectHttp(url: string): Promise<PageResult> {
       title,
       description: attribute(metas.find((tag) => attribute(tag, 'name').toLowerCase() === 'description') ?? '', 'content'),
       h1s,
-      canonical: attribute(linkTags.find((tag) => attribute(tag, 'rel').toLowerCase().split(/\s+/).includes('canonical')) ?? '', 'href'),
+      canonical: canonicalValue ? normalizeUrl(canonicalValue, response.url) ?? canonicalValue : '',
       robots: attribute(metas.find((tag) => attribute(tag, 'name').toLowerCase() === 'robots') ?? '', 'content'),
       lang: attribute(html.match(/<html\b[^>]*>/i)?.[0] ?? '', 'lang'),
       textLength: plainText(body).length,
@@ -455,6 +456,35 @@ for (const url of missingFromCrawl) findings.push({ severity: '中', url, issue:
 const severityOrder = { 高: 0, 中: 1, 低: 2 }
 findings.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity] || a.url.localeCompare(b.url))
 
+const strengths: string[] = []
+const validPages = results.filter((page) => !page.error && page.status !== null && page.status < 400)
+const validCount = validPages.length
+const strengthCount = (predicate: (page: PageResult) => boolean) => validPages.filter(predicate).length
+const addCoverage = (label: string, predicate: (page: PageResult) => boolean) => {
+  const count = strengthCount(predicate)
+  if (count > 0) strengths.push(`${count}/${validCount}ページで${label}`)
+}
+
+if (robotsStatus === 200) strengths.push('robots.txtを正常に取得できる')
+if (sitemapUrls.size > 0) strengths.push(`XMLサイトマップから${sitemapUrls.size}件のURLを確認できる`)
+if (validCount > 0) strengths.push(`${validCount}/${results.length}ページをHTTPエラーなく取得できる`)
+addCoverage('titleが設定されている', (page) => Boolean(page.title))
+const titledPages = validPages.filter((page) => page.title)
+if (titledPages.length > 0 && new Set(titledPages.map((page) => page.title)).size === titledPages.length) {
+  strengths.push(`titleが設定された${titledPages.length}ページすべてで内容が重複していない`)
+}
+addCoverage('meta descriptionが設定されている', (page) => Boolean(page.description))
+addCoverage('H1が1つに整理されている', (page) => page.h1s.length === 1)
+addCoverage('同一サイト内のcanonicalが設定されている', (page) => Boolean(page.canonical) && sameSite(page.canonical))
+addCoverage('html要素にlang属性が設定されている', (page) => Boolean(page.lang))
+addCoverage('noindexが指定されていない', (page) => !/\bnoindex\b/i.test(page.robots))
+addCoverage('十分な可視テキストを取得できる', (page) => page.textLength >= 200)
+const pagesWithImages = validPages.filter((page) => page.images > 0)
+if (pagesWithImages.length > 0) {
+  const completeAltPages = pagesWithImages.filter((page) => page.imagesWithoutAlt === 0).length
+  if (completeAltPages > 0) strengths.push(`${completeAltPages}/${pagesWithImages.length}ページで全画像にalt属性が設定されている`)
+}
+
 const counts = {
   high: findings.filter((item) => item.severity === '高').length,
   medium: findings.filter((item) => item.severity === '中').length,
@@ -470,6 +500,10 @@ const report = `# SEO診断レポート
 - サイトマップ掲載URL数: ${sitemapUrls.size}
 - robots.txt: ${robotsStatus ?? '取得不能'}
 - 問題: 高 ${counts.high}件 / 中 ${counts.medium}件 / 低 ${counts.low}件
+
+## 良い点
+
+${strengths.length === 0 ? '機械的に確認できる良い点は見つかりませんでした。' : strengths.map((item) => `- ${item}`).join('\n')}
 
 ## 診断結果
 
