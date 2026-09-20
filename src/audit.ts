@@ -256,12 +256,12 @@ try {
       const request = route.request()
       const requestUrl = request.url()
       const resourceType = request.resourceType()
-      await assertPublicUrl(requestUrl)
-      if (['image', 'media', 'font'].includes(resourceType)) {
+      if (resourceType !== 'document' && new URL(requestUrl).origin !== startUrl.origin) {
         await route.abort('blockedbyclient')
         return
       }
-      if (resourceType !== 'document' && new URL(requestUrl).origin !== startUrl.origin) {
+      await assertPublicUrl(requestUrl)
+      if (['image', 'media', 'font'].includes(resourceType)) {
         await route.abort('blockedbyclient')
         return
       }
