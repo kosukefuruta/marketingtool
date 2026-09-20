@@ -30,13 +30,15 @@ function page(message = ''): string {
     input, button { box-sizing: border-box; width: 100%; padding: 12px; font: inherit; }
     button { cursor: pointer; }
     .message { color: #b42318; }
+    #result { margin-top: 32px; }
+    pre { max-height: 70vh; overflow: auto; padding: 16px; border: 1px solid #8886; border-radius: 8px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
   <h1>Owtell SEO診断ツール</h1>
   <p>公開サイトのURLを入力すると、技術SEO上の問題をMarkdownで返します。</p>
   ${message ? `<p class="message">${message}</p>` : ''}
-  <form method="post" action="/audit">
+  <form id="audit-form" method="post" action="/audit">
     <label>診断するURL
       <input name="url" type="url" placeholder="https://example.com" required>
     </label>
@@ -45,6 +47,68 @@ function page(message = ''): string {
     </label>
     <button type="submit">診断を開始</button>
   </form>
+  <section id="result" hidden aria-live="polite">
+    <h2 id="result-title">診断中です</h2>
+    <p id="result-status">この画面を開いたままお待ちください。</p>
+    <p><a id="report-link" hidden>Markdownレポートを表示</a></p>
+    <pre id="report" hidden></pre>
+  </section>
+  <script>
+    const form = document.querySelector('#audit-form')
+    const button = form.querySelector('button')
+    const result = document.querySelector('#result')
+    const resultTitle = document.querySelector('#result-title')
+    const resultStatus = document.querySelector('#result-status')
+    const reportLink = document.querySelector('#report-link')
+    const report = document.querySelector('#report')
+
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault()
+      button.disabled = true
+      result.hidden = false
+      resultTitle.textContent = '診断中です'
+      resultStatus.textContent = 'サイトを巡回しています。この画面を開いたままお待ちください。'
+      reportLink.hidden = true
+      report.hidden = true
+      report.textContent = ''
+
+      try {
+        const response = await fetch('/audit', {
+          method: 'POST',
+          headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams(new FormData(form)),
+        })
+        const body = await response.json()
+        if (!response.ok) throw new Error(body.error || '診断を開始できませんでした。')
+
+        while (true) {
+          await wait(2000)
+          const statusResponse = await fetch(body.statusUrl, { headers: { accept: 'application/json' }, cache: 'no-store' })
+          const job = await statusResponse.json()
+          if (!statusResponse.ok) throw new Error(job.error || '診断状況を取得できませんでした。')
+          if (job.status === 'error') throw new Error(job.error || '診断に失敗しました。')
+          if (job.status !== 'done') continue
+
+          const reportResponse = await fetch(job.reportUrl, { cache: 'no-store' })
+          if (!reportResponse.ok) throw new Error('レポートを取得できませんでした。')
+          report.textContent = await reportResponse.text()
+          report.hidden = false
+          reportLink.href = job.reportUrl
+          reportLink.hidden = false
+          resultTitle.textContent = '診断が完了しました'
+          resultStatus.textContent = '結果をこのページに表示しています。'
+          break
+        }
+      } catch (error) {
+        resultTitle.textContent = '診断に失敗しました'
+        resultStatus.textContent = error instanceof Error ? error.message : String(error)
+      } finally {
+        button.disabled = false
+      }
+    })
+  </script>
 </body>
 </html>`
 }
@@ -111,6 +175,19 @@ const server = createServer(async (request, response) => {
     return
   }
 
+  const apiJobMatch = request.method === 'GET' ? request.url?.match(/^\/api\/jobs\/([a-f0-9-]+)$/) : null
+  if (apiJobMatch) {
+    const job = jobs.get(apiJobMatch[1])
+    response.writeHead(job ? 200 : 404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    if (!job) response.end(JSON.stringify({ error: '診断ジョブが見つかりません。' }))
+    else response.end(JSON.stringify({
+      status: job.status,
+      error: job.error,
+      reportUrl: job.status === 'done' ? `/jobs/${apiJobMatch[1]}/report` : undefined,
+    }))
+    return
+  }
+
   const reportMatch = request.method === 'GET' ? request.url?.match(/^\/jobs\/([a-f0-9-]+)\/report$/) : null
   if (reportMatch) {
     const job = jobs.get(reportMatch[1])
@@ -142,9 +219,15 @@ const server = createServer(async (request, response) => {
   }
 
   if (request.method === 'POST' && request.url === '/audit') {
+    const wantsJson = request.headers.accept?.includes('application/json') ?? false
     if (auditing) {
-      response.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'retry-after': '30' })
-      response.end(page('現在、別の診断を実行中です。少し待ってから再実行してください。'))
+      response.writeHead(503, {
+        'content-type': wantsJson ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
+        'retry-after': '30',
+      })
+      response.end(wantsJson
+        ? JSON.stringify({ error: '現在、別の診断を実行中です。少し待ってから再実行してください。' })
+        : page('現在、別の診断を実行中です。少し待ってから再実行してください。'))
       return
     }
 
@@ -172,12 +255,20 @@ const server = createServer(async (request, response) => {
         await unlink(output).catch(() => {})
       })
 
-      response.writeHead(303, { location: `/jobs/${id}`, 'cache-control': 'no-store' })
-      response.end()
+      if (wantsJson) {
+        response.writeHead(202, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        response.end(JSON.stringify({ id, statusUrl: `/api/jobs/${id}` }))
+      } else {
+        response.writeHead(303, { location: `/jobs/${id}`, 'cache-control': 'no-store' })
+        response.end()
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      response.writeHead(400, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
-      response.end(page(message))
+      response.writeHead(400, {
+        'content-type': wantsJson ? 'application/json; charset=utf-8' : 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+      })
+      response.end(wantsJson ? JSON.stringify({ error: message }) : page(message))
     }
     return
   }
