@@ -3,6 +3,9 @@ import { readFile, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
+const AUDIT_TIMEOUT_MS = 600_000
+const FORCE_KILL_DELAY_MS = 10_000
+
 export type AuditJob = {
   status: "running" | "done" | "error"
   createdAt: number
@@ -32,29 +35,37 @@ export function isAuditRunning(): boolean {
   return globalThis.__auditRunning === true
 }
 
-function runAudit(url: string, max: number, output: string, onProgress: (value: string) => void): Promise<void> {
-  return new Promise((resolve, reject) => {
-    // The production image ships a bundled audit script; local development runs the TypeScript source.
-    const script = process.env.AUDIT_SCRIPT ? [process.env.AUDIT_SCRIPT] : ["--import", "tsx", "src/audit.ts"]
-    const child = spawn(process.execPath, [...script, url, `--max=${max}`, `--output=${output}`], {
-      stdio: ["ignore", "pipe", "inherit"],
-      env: process.env,
-    })
-    let buffer = ""
-    child.stdout.setEncoding("utf8")
-    child.stdout.on("data", (chunk: string) => {
-      buffer += chunk
-      const lines = buffer.split("\n")
-      buffer = lines.pop() ?? ""
-      for (const line of lines) {
-        const match = line.match(/^\[(\d+)\/(\d+)\]\s+(.+)$/)
-        if (match) onProgress(`${match[1]}/${match[2]}ページを診断中: ${match[3]}`)
-      }
-    })
+function runAudit(url: string, max: number, output: string, onProgress: (value: string) => void): { result: Promise<void>; exited: Promise<void> } {
+  // The production image ships a bundled audit script; local development runs the TypeScript source.
+  const script = process.env.AUDIT_SCRIPT ? [process.env.AUDIT_SCRIPT] : ["--import", "tsx", "src/audit.ts"]
+  const child = spawn(process.execPath, [...script, url, `--max=${max}`, `--output=${output}`], {
+    stdio: ["ignore", "pipe", "inherit"],
+    env: process.env,
+  })
+  let buffer = ""
+  child.stdout.setEncoding("utf8")
+  child.stdout.on("data", (chunk: string) => {
+    buffer += chunk
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+    for (const line of lines) {
+      const match = line.match(/^\[(\d+)\/(\d+)\]\s+(.+)$/)
+      if (match) onProgress(`${match[1]}/${match[2]}ページを診断中: ${match[3]}`)
+    }
+  })
+
+  const exited = new Promise<void>((resolve) => {
+    child.once("close", () => resolve())
+    child.once("error", () => resolve())
+  })
+
+  const result = new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
       child.kill("SIGTERM")
+      // Chromium does not always stop on SIGTERM, and the slot stays held until the process is gone.
+      setTimeout(() => child.kill("SIGKILL"), FORCE_KILL_DELAY_MS).unref()
       reject(new Error("診断が制限時間を超えました。ページ数を減らしてください。"))
-    }, 600_000)
+    }, AUDIT_TIMEOUT_MS)
     child.once("error", (error) => { clearTimeout(timer); reject(error) })
     child.once("exit", (code) => {
       clearTimeout(timer)
@@ -62,6 +73,8 @@ function runAudit(url: string, max: number, output: string, onProgress: (value: 
       else reject(new Error(`診断処理が終了コード${code ?? "不明"}で失敗しました。`))
     })
   })
+
+  return { result, exited }
 }
 
 export function startAudit(url: string, max: number): string {
@@ -70,14 +83,18 @@ export function startAudit(url: string, max: number): string {
   const output = join(tmpdir(), `seo-report-${id}.md`)
   auditJobs.set(id, { status: "running", createdAt: Date.now(), progress: "診断の準備中です。" })
   globalThis.__auditRunning = true
-  void runAudit(url, max, output, (progress) => {
+  const { result, exited } = runAudit(url, max, output, (progress) => {
     const job = auditJobs.get(id)
     if (job?.status === "running") job.progress = progress
-  }).then(async () => {
+  })
+  void result.then(async () => {
     auditJobs.set(id, { status: "done", createdAt: Date.now(), report: await readFile(output, "utf8") })
   }).catch((error: unknown) => {
     auditJobs.set(id, { status: "error", createdAt: Date.now(), error: error instanceof Error ? error.message : String(error) })
   }).finally(async () => {
+    // A timeout rejects before the child is gone; releasing the slot early would let a second crawl run
+    // alongside the dying one, and the file must outlive the child that is still writing to it.
+    await exited
     globalThis.__auditRunning = false
     await unlink(output).catch(() => undefined)
   })
