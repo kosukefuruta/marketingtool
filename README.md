@@ -1,4 +1,4 @@
-# Marketing Tool
+# Owtell SEO診断ツール
 
 URLを入力すると、公開サイトを巡回して技術SEO上の問題をMarkdownにまとめるCLIツールです。
 
@@ -60,10 +60,23 @@ XMLサイトマップとページ内の内部リンクから、同じオリジ�
 
 Web版の診断はバックグラウンドで実行されます。画面遷移せずに診断状況を確認し、完了するとMarkdownレポートを解析して、見出しや表として同じページ内に表示します。レポートは完了から約1時間、実行したサーバーのメモリ上に保持されます。JavaScriptが無効な環境では進捗ページへ遷移します。
 
-## 開発
+## Webアプリの開発
+
+無料診断に加えて、メール認証、サイト登録、Stripe課金の基盤を含みます。認証はパスワードを持たない6桁のメールOTP方式です。
+
+`.env.example`を`.env.local`へコピーし、Neon、SES、Stripeの値を設定してください。その後、DBマイグレーションと開発サーバーを起動します。
+
+```bash
+pnpm db:migrate
+pnpm dev
+```
+
+品質確認:
 
 ```bash
 pnpm typecheck
+pnpm test
+pnpm build
 ```
 
 ## Koyebへデプロイ
@@ -75,11 +88,12 @@ pnpm typecheck
 3. Builderに`Dockerfile`を選択する
 4. 公開ポートを`8000`、プロトコルをHTTPにする
 5. HTTPヘルスチェックのパスを`/health`にする
-6. デプロイする
+6. `.env.example`に記載された本番環境変数を登録する
+7. デプロイする（起動時にDBマイグレーションが実行されます）
 
 アプリケーションはKoyebが設定する`PORT`環境変数を利用します。Chromiumを起動するため、メモリ不足になる場合はインスタンスサイズを上げてください。
 
-詳しい現在の仕様は[docs/seo-audit-v0.1.md](docs/seo-audit-v0.1.md)を参照してください。
+詳しい現在の仕様は[docs/seo-audit-v0.1.md](docs/seo-audit-v0.1.md)を参照してください。無料版・有料版、競合調査、施策管理と効果測定の構想は[docs/product-plan.md](docs/product-plan.md)、有料版のシステム要件は[docs/paid-feature-requirements.md](docs/paid-feature-requirements.md)、最初の認証・サイト登録・課金の実装手順は[docs/phase1-auth-site-billing-plan.md](docs/phase1-auth-site-billing-plan.md)にまとめています。
 
 ## 現在の制約
 
