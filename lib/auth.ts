@@ -10,6 +10,9 @@ import { sendOtpEmail } from "@/lib/mail"
 import { SlidingWindowLimiter } from "@/lib/rate-limit"
 
 const otpLimiter = new SlidingWindowLimiter(60 * 60 * 1000, 5)
+// A service-wide ceiling: an address-keyed limit alone cannot stop a caller that cycles through addresses,
+// and unbounded SES sending to third parties would damage the sending identity the whole login flow needs.
+const otpServiceLimiter = new SlidingWindowLimiter(60 * 60 * 1000, 100)
 const isProductionBuild = process.env.NEXT_PHASE === "phase-production-build"
 const baseURL = process.env.BETTER_AUTH_URL ?? process.env.APP_BASE_URL ?? (isProductionBuild ? "http://localhost:8000" : undefined)
 
@@ -22,6 +25,11 @@ function generateOtpOrThrottle({ email }: { email: string }): string {
   const result = otpLimiter.checkAndRecord(normalizeEmail(email))
   if (!result.allowed) {
     throw new APIError("TOO_MANY_REQUESTS", { message: "認証コードの送信回数が上限に達しました。しばらく待ってからお試しください。" })
+  }
+  const service = otpServiceLimiter.checkAndRecord("service")
+  if (!service.allowed) {
+    console.error("[auth] hourly OTP ceiling reached; no further codes are being sent", { retryAfter: service.retryAfter })
+    throw new APIError("TOO_MANY_REQUESTS", { message: "現在、認証コードを送信できません。しばらく待ってからお試しください。" })
   }
   return generateRandomString(6, "0-9")
 }

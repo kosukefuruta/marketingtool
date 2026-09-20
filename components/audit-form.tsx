@@ -78,7 +78,7 @@ export function AuditForm() {
   return <section className="card">
     <form className="stack" action={submit}>
       <label className="field">診断するURL<input name="url" type="url" placeholder="https://example.com" required /></label>
-      <label className="field">最大ページ数<input name="max" type="number" min="1" max="300" defaultValue="10" required /></label>
+      <label className="field">最大ページ数<input name="max" type="number" min="1" max="10" defaultValue="10" required /></label>
       <button className="button" disabled={running}>{running ? "診断中です" : "診断を開始"}</button>
     </form>
     {status && <p className="status" aria-live="polite">{status}</p>}
