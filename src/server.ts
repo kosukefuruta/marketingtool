@@ -11,6 +11,7 @@ let auditing = false
 type Job = {
   status: 'running' | 'done' | 'error'
   createdAt: number
+  progress?: string
   report?: string
   error?: string
 }
@@ -89,7 +90,10 @@ function page(message = ''): string {
           const job = await statusResponse.json()
           if (!statusResponse.ok) throw new Error(job.error || '診断状況を取得できませんでした。')
           if (job.status === 'error') throw new Error(job.error || '診断に失敗しました。')
-          if (job.status !== 'done') continue
+          if (job.status !== 'done') {
+            if (job.progress) resultStatus.textContent = job.progress
+            continue
+          }
 
           const reportResponse = await fetch(job.reportUrl, { cache: 'no-store' })
           if (!reportResponse.ok) throw new Error('レポートを取得できませんでした。')
@@ -140,11 +144,23 @@ function collectBody(request: IncomingMessage): Promise<string> {
   })
 }
 
-function runAudit(url: string, max: number, output: string): Promise<void> {
+function runAudit(url: string, max: number, output: string, onProgress: (progress: string) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['--import', 'tsx', 'src/audit.ts', url, `--max=${max}`, `--output=${output}`], {
-      stdio: ['ignore', 'inherit', 'inherit'],
+      stdio: ['ignore', 'pipe', 'inherit'],
       env: process.env,
+    })
+    let stdoutBuffer = ''
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => {
+      process.stdout.write(chunk)
+      stdoutBuffer += chunk
+      const lines = stdoutBuffer.split('\n')
+      stdoutBuffer = lines.pop() ?? ''
+      for (const line of lines) {
+        const match = line.match(/^\[(\d+)\/(\d+)\]\s+(.+)$/)
+        if (match) onProgress(`${match[1]}/${match[2]}ページを診断中: ${match[3]}`)
+      }
     })
     const timer = setTimeout(() => {
       child.kill('SIGTERM')
@@ -182,6 +198,7 @@ const server = createServer(async (request, response) => {
     if (!job) response.end(JSON.stringify({ error: '診断ジョブが見つかりません。' }))
     else response.end(JSON.stringify({
       status: job.status,
+      progress: job.progress,
       error: job.error,
       reportUrl: job.status === 'done' ? `/jobs/${apiJobMatch[1]}/report` : undefined,
     }))
@@ -239,9 +256,12 @@ const server = createServer(async (request, response) => {
 
       const id = randomUUID()
       const output = join(tmpdir(), `seo-report-${id}.md`)
-      jobs.set(id, { status: 'running', createdAt: Date.now() })
+      jobs.set(id, { status: 'running', createdAt: Date.now(), progress: '診断の準備中です。' })
       auditing = true
-      void runAudit(url, max, output).then(async () => {
+      void runAudit(url, max, output, (progress) => {
+        const job = jobs.get(id)
+        if (job?.status === 'running') job.progress = progress
+      }).then(async () => {
         const report = await readFile(output, 'utf8')
         jobs.set(id, { status: 'done', createdAt: Date.now(), report })
       }).catch((error: unknown) => {

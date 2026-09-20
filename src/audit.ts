@@ -176,7 +176,8 @@ async function loadSitemaps(robotsText: string): Promise<Set<string>> {
 
 async function inspectPage(page: Page, url: string): Promise<PageResult> {
   try {
-    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 12_000 })
+    const response = await page.goto(url, { waitUntil: 'commit', timeout: 12_000 })
+    await page.waitForLoadState('domcontentloaded', { timeout: 3_000 }).catch(() => {})
     // DOMContentLoaded後に短く待ち、一般的なクライアント描画を取り込む。
     // networkidle待ちは広告や計測通信のあるページで毎回タイムアウトし、巡回を大幅に遅くするため使わない。
     await page.waitForTimeout(500)
