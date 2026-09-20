@@ -18,7 +18,7 @@ function safeHeader(value: string): string {
 }
 
 export async function sendOtpEmail(to: string, otp: string): Promise<void> {
-  const from = process.env.MAIL_FROM ?? "Owtell <no-reply@owtell.com>"
+  const from = process.env.MAIL_FROM ?? "Owtell <support@tool.owtell.com>"
   const subject = `${otp} はOwtell SEO診断ツールの認証コードです`
   const text = `Owtell SEO診断ツールの認証コードは ${otp} です。このコードは10分間有効です。心当たりがない場合は、このメールを無視してください。`
   const html = `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:40px 24px"><h1 style="font-size:20px">Owtell SEO診断ツール</h1><p>ログイン用の認証コードです。</p><p style="font-size:32px;font-weight:700;letter-spacing:6px;text-align:center;padding:20px;background:#f5f5f5;border-radius:8px">${otp}</p><p style="color:#666;font-size:13px">このコードは10分間有効です。心当たりがない場合は、このメールを無視してください。</p></div>`

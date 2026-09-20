@@ -95,6 +95,8 @@ pnpm build
 
 詳しい現在の仕様は[docs/seo-audit-v0.1.md](docs/seo-audit-v0.1.md)を参照してください。無料版・有料版、競合調査、施策管理と効果測定の構想は[docs/product-plan.md](docs/product-plan.md)、有料版のシステム要件は[docs/paid-feature-requirements.md](docs/paid-feature-requirements.md)、最初の認証・サイト登録・課金の実装手順は[docs/phase1-auth-site-billing-plan.md](docs/phase1-auth-site-billing-plan.md)にまとめています。
 
+Koyebの本番設定値と初回確認手順は[docs/koyeb-deployment-checklist.md](docs/koyeb-deployment-checklist.md)を参照してください。
+
 ## 現在の制約
 
 - 公開ページのみが対象です。ログインが必要なページには対応していません。

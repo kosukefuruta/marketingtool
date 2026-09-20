@@ -1,22 +1,17 @@
 import { eq } from "drizzle-orm"
 import type Stripe from "stripe"
 import { db } from "@/lib/db"
-import { subscription } from "@/lib/db/schema"
+import { subscription, user } from "@/lib/db/schema"
+import { gracePeriodForStatus } from "@/lib/subscription-access"
 
-export const ACCESSIBLE_SUBSCRIPTION_STATUSES = new Set(["trialing", "active", "past_due", "canceling"])
-
-export function hasPaidAccess(status: string | null | undefined, gracePeriodEndsAt?: Date | null): boolean {
-  if (!status) return false
-  if (status === "past_due") return !gracePeriodEndsAt || gracePeriodEndsAt > new Date()
-  return ACCESSIBLE_SUBSCRIPTION_STATUSES.has(status)
-}
+export { hasPaidAccess } from "@/lib/subscription-access"
 
 function periodEnd(value: Stripe.Subscription): Date | null {
   const seconds = value.items.data.map((item) => item.current_period_end).filter(Boolean).sort((a, b) => b - a)[0]
   return seconds ? new Date(seconds * 1000) : null
 }
 
-export async function syncStripeSubscription(value: Stripe.Subscription, userId?: string): Promise<void> {
+export async function syncStripeSubscription(value: Stripe.Subscription, userId?: string): Promise<boolean> {
   const customerId = typeof value.customer === "string" ? value.customer : value.customer.id
   let ownerId = userId ?? value.metadata.userId
   if (!ownerId) {
@@ -26,9 +21,34 @@ export async function syncStripeSubscription(value: Stripe.Subscription, userId?
   }
   if (!ownerId) throw new Error(`No user mapping for Stripe customer ${customerId}`)
 
+  const [owner] = await db.select({ stripeCustomerId: user.stripeCustomerId })
+    .from(user).where(eq(user.id, ownerId)).limit(1)
+  if (!owner?.stripeCustomerId || owner.stripeCustomerId !== customerId) {
+    console.warn("[stripe-webhook] customer ownership check failed", {
+      userId: ownerId,
+      subscriptionId: value.id,
+      customerId,
+      reason: owner ? "mismatch" : "no_owner",
+    })
+    return false
+  }
+
+  const actualPriceId = value.items.data[0]?.price.id ?? null
+  const configuredPriceId = process.env.STRIPE_PRICE_ID?.trim() || null
+  if (configuredPriceId && actualPriceId !== configuredPriceId) {
+    console.error("[stripe-webhook] unexpected price id; subscription ignored", {
+      userId: ownerId,
+      subscriptionId: value.id,
+      actualPriceId,
+    })
+    return false
+  }
+
   const now = new Date()
+  const [existingSubscription] = await db.select({ gracePeriodEndsAt: subscription.gracePeriodEndsAt })
+    .from(subscription).where(eq(subscription.userId, ownerId)).limit(1)
   const rawStatus = value.cancel_at_period_end && value.status !== "canceled" ? "canceling" : value.status
-  const gracePeriodEndsAt = value.status === "past_due" ? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000) : null
+  const gracePeriodEndsAt = gracePeriodForStatus(value.status, existingSubscription?.gracePeriodEndsAt, now)
   await db.insert(subscription).values({
     id: crypto.randomUUID(),
     userId: ownerId,
@@ -54,4 +74,5 @@ export async function syncStripeSubscription(value: Stripe.Subscription, userId?
       updatedAt: now,
     },
   })
+  return true
 }
