@@ -94,15 +94,38 @@ export async function startCheckout(): Promise<void> {
   redirect(checkout.url)
 }
 
-export async function openBillingPortal(): Promise<void> {
+export async function startCardUpdate(): Promise<void> {
   const current = await requireSession()
   const [account] = await db.select({ stripeCustomerId: user.stripeCustomerId }).from(user)
     .where(eq(user.id, current.user.id)).limit(1)
   const baseUrl = process.env.APP_BASE_URL ?? process.env.BETTER_AUTH_URL
   if (!account?.stripeCustomerId || !baseUrl) throw new Error("契約情報が見つかりません。")
-  const portal = await getStripe().billingPortal.sessions.create({
+  const checkout = await getStripe().checkout.sessions.create({
+    mode: "setup",
     customer: account.stripeCustomerId,
-    return_url: `${baseUrl}/settings/billing`,
+    payment_method_types: ["card"],
+    success_url: `${baseUrl}/settings/billing?card=success`,
+    cancel_url: `${baseUrl}/settings/billing?card=canceled`,
+    locale: "ja",
   })
-  redirect(portal.url)
+  if (!checkout.url) throw new Error("支払方法の変更画面を開始できませんでした。")
+  redirect(checkout.url)
+}
+
+async function setCancelAtPeriodEnd(cancelAtPeriodEnd: boolean): Promise<never> {
+  const current = await requireSession()
+  const [record] = await db.select({ stripeSubscriptionId: subscription.stripeSubscriptionId })
+    .from(subscription).where(eq(subscription.userId, current.user.id)).limit(1)
+  if (!record?.stripeSubscriptionId) throw new Error("契約情報が見つかりません。")
+  await getStripe().subscriptions.update(record.stripeSubscriptionId, { cancel_at_period_end: cancelAtPeriodEnd })
+  // The subscription row is only updated by the signed webhook, so the page waits for it rather than guessing.
+  redirect(`/settings/billing?pending=${cancelAtPeriodEnd ? "cancel" : "resume"}`)
+}
+
+export async function scheduleCancellation(): Promise<void> {
+  await setCancelAtPeriodEnd(true)
+}
+
+export async function resumeSubscription(): Promise<void> {
+  await setCancelAtPeriodEnd(false)
 }

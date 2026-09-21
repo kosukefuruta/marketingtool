@@ -19,7 +19,7 @@ Owtellは、URLを入力して技術SEO上の問題を診断し、将来的にSE
 - Next.js App Router / React
 - PostgreSQL（Neon）/ Drizzle ORM
 - Better AuthのメールOTP / Amazon SES
-- Stripe Checkout、Subscription Webhook、Customer Portal
+- Stripe Checkout（subscription / setup）、Subscription Webhook
 - PlaywrightによるSEO診断
 - KoyebへDockerfileでデプロイ
 

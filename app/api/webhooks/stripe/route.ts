@@ -2,7 +2,7 @@ import type Stripe from "stripe"
 import { and, eq, lt, or } from "drizzle-orm"
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { site, stripeWebhookEvent, subscription } from "@/lib/db/schema"
+import { site, stripeWebhookEvent, subscription, user } from "@/lib/db/schema"
 import { getStripe } from "@/lib/stripe"
 import { hasPaidAccess, syncStripeSubscription } from "@/lib/subscriptions"
 
@@ -20,6 +20,48 @@ async function subscriptionFromEvent(event: Stripe.Event): Promise<{ value: Stri
     return { value: await getStripe().subscriptions.retrieve(incoming.id), userId: incoming.metadata.userId }
   }
   return null
+}
+
+const BILLABLE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due"])
+
+// A card added through a setup-mode Checkout is stored on the customer but is not billed until it is
+// made the default, so the subscription keeps charging the old card without this.
+async function applyDefaultPaymentMethod(setupIntent: Stripe.SetupIntent): Promise<void> {
+  const customerId = typeof setupIntent.customer === "string" ? setupIntent.customer : setupIntent.customer?.id
+  const paymentMethodId = typeof setupIntent.payment_method === "string" ? setupIntent.payment_method : setupIntent.payment_method?.id
+  if (!customerId || !paymentMethodId) return
+
+  const [owner] = await db.select({ id: user.id }).from(user).where(eq(user.stripeCustomerId, customerId)).limit(1)
+  if (!owner) {
+    console.warn("[stripe-webhook] setup intent for an unknown customer", { customerId })
+    return
+  }
+
+  const stripe = getStripe()
+  await stripe.customers.update(customerId, { invoice_settings: { default_payment_method: paymentMethodId } })
+  const subscriptions = await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 100 })
+  for (const record of subscriptions.data) {
+    if (!BILLABLE_SUBSCRIPTION_STATUSES.has(record.status)) continue
+    await stripe.subscriptions.update(record.id, { default_payment_method: paymentMethodId })
+    if (record.status === "past_due") await settleOpenInvoice(record, paymentMethodId)
+  }
+}
+
+// Stripe's own retry can fall after the payment grace period, so a user who fixes their card would still
+// lose access. Charging the open invoice now settles it while they are watching.
+async function settleOpenInvoice(record: Stripe.Subscription, paymentMethodId: string): Promise<void> {
+  const invoiceId = typeof record.latest_invoice === "string" ? record.latest_invoice : record.latest_invoice?.id
+  if (!invoiceId) return
+  try {
+    await getStripe().invoices.pay(invoiceId, { payment_method: paymentMethodId })
+  } catch (error) {
+    // A declined card is the customer's problem to fix, not a webhook failure: Stripe still retries on its own.
+    console.warn("[stripe-webhook] could not settle the open invoice", {
+      subscriptionId: record.id,
+      invoiceId,
+      message: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
+    })
+  }
 }
 
 // A claim older than this belongs to a request whose process died before it could finish.
@@ -71,6 +113,13 @@ export async function POST(request: Request) {
   if (claimed.length === 0) return NextResponse.json({ received: true, deduped: true })
 
   try {
+    if (event.type === "setup_intent.succeeded") {
+      await applyDefaultPaymentMethod(event.data.object as Stripe.SetupIntent)
+      await db.update(stripeWebhookEvent).set({ status: "processed", processedAt: new Date(), lastError: null })
+        .where(eq(stripeWebhookEvent.stripeEventId, event.id))
+      return NextResponse.json({ received: true })
+    }
+
     const resolved = await subscriptionFromEvent(event)
     if (resolved) {
       const result = await syncStripeSubscription(resolved.value, resolved.userId)
