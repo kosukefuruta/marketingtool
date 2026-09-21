@@ -1,9 +1,13 @@
 "use server"
 
 import { and, count, eq, inArray, isNull, sql } from "drizzle-orm"
+import { headers } from "next/headers"
 import { redirect } from "next/navigation"
+import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
-import { auditJob, goal, site, subscription, user } from "@/lib/db/schema"
+import { account, auditJob, goal, site, subscription, user } from "@/lib/db/schema"
+import { loadGoogleProperties } from "@/lib/google-data"
+import { searchConsoleSiteMatches } from "@/lib/google-property-match"
 import { goalMetrics, goalNameFor, goalSubjectForMetric, isGoalMetric, validateGoalValues } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
 import { defaultSiteName, normalizePublicSiteUrl } from "@/lib/sites"
@@ -68,18 +72,63 @@ export async function saveSite(_state: SiteFormState, formData: FormData): Promi
 
 export type GoalFormState = { error?: string }
 
+export type GooglePropertiesFormState = { error?: string; success?: string }
+
+export async function saveGoogleProperties(_state: GooglePropertiesFormState, formData: FormData): Promise<GooglePropertiesFormState> {
+  const current = await requireSession()
+  const siteId = String(formData.get("siteId") ?? "").trim()
+  const updatesSearchConsole = formData.has("searchConsoleProperty")
+  const updatesAnalytics = formData.has("ga4Property")
+  const searchConsoleProperty = String(formData.get("searchConsoleProperty") ?? "").trim()
+  const ga4Property = String(formData.get("ga4Property") ?? "").trim()
+  if (!siteId || (!updatesSearchConsole && !updatesAnalytics)) return { error: "更新できるプロパティがありません。" }
+
+  const [[ownedSite], [googleAccount]] = await Promise.all([
+    db.select({ id: site.id, origin: site.normalizedOrigin }).from(site).where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1),
+    db.select({ accountId: account.accountId }).from(account).where(and(eq(account.userId, current.user.id), eq(account.providerId, "google"))).limit(1),
+  ])
+  if (!ownedSite) return { error: "登録サイトが見つかりません。" }
+
+  if (searchConsoleProperty || ga4Property) {
+    if (!googleAccount) return { error: "Googleアカウントを接続してください。" }
+    let properties: Awaited<ReturnType<typeof loadGoogleProperties>>
+    try {
+      properties = await loadGoogleProperties(googleAccount.accountId, await headers())
+    } catch {
+      return { error: "Googleの権限を確認できませんでした。再接続してからお試しください。" }
+    }
+    if (searchConsoleProperty && (properties.searchConsoleError
+      || !properties.searchConsoleSites.some((item) => item.siteUrl === searchConsoleProperty)
+      || !searchConsoleSiteMatches(searchConsoleProperty, ownedSite.origin))) {
+      return { error: "選択したSearch Consoleプロパティは登録サイトに利用できません。" }
+    }
+    if (ga4Property && (properties.analyticsError || !properties.analyticsProperties.some((item) => item.property === ga4Property))) {
+      return { error: "選択したGA4プロパティを利用できません。" }
+    }
+  }
+
+  const values: { updatedAt: Date; searchConsoleProperty?: string | null; ga4Property?: string | null } = { updatedAt: new Date() }
+  if (updatesSearchConsole) values.searchConsoleProperty = searchConsoleProperty || null
+  if (updatesAnalytics) values.ga4Property = ga4Property || null
+  await db.update(site).set(values).where(and(eq(site.id, siteId), eq(site.userId, current.user.id)))
+  revalidatePath(`/dashboard/sites/${siteId}/integrations/google`)
+  return { success: "使用するGoogleプロパティを保存しました。" }
+}
+
 export async function createGoal(_state: GoalFormState, formData: FormData): Promise<GoalFormState> {
   const current = await requireSession()
   const siteId = String(formData.get("siteId") ?? "").trim()
   const subjectValue = String(formData.get("subjectValue") ?? "").trim()
   const metric = String(formData.get("metric") ?? "")
   const targetRaw = String(formData.get("targetValue") ?? "").trim()
+  const category = String(formData.get("category") ?? "")
 
   if (!siteId || !isGoalMetric(metric) || !targetRaw) {
     return { error: "指標と目標値を入力してください。" }
   }
   const subjectType = goalSubjectForMetric(metric)
   if (subjectType === "keyword" && !subjectValue) return { error: "キーワードを入力してください。" }
+  if (metric === "adRevenue" && !isSiteCategory(category)) return { error: "サイトジャンルを選択してください。" }
   if (subjectValue.length > 200) return { error: "キーワードは200文字以内で入力してください。" }
   const targetValue = Number(targetRaw)
   const valueError = validateGoalValues(metric, null, targetValue)
@@ -93,21 +142,26 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
 
   const now = new Date()
   const goalId = crypto.randomUUID()
-  await db.insert(goal).values({
-    id: goalId,
-    userId: current.user.id,
-    siteId,
-    name: goalNameFor(metric, targetValue, normalizedSubjectValue),
-    subjectType,
-    subjectValue: normalizedSubjectValue,
-    metric,
-    baselineValue: null,
-    targetValue,
-    period: goalMetrics[metric].defaultPeriod,
-    createdAt: now,
-    updatedAt: now,
+  await db.transaction(async (tx) => {
+    if (metric === "adRevenue" && isSiteCategory(category)) {
+      await tx.update(site).set({ category, updatedAt: now }).where(and(eq(site.id, siteId), eq(site.userId, current.user.id)))
+    }
+    await tx.insert(goal).values({
+      id: goalId,
+      userId: current.user.id,
+      siteId,
+      name: goalNameFor(metric, targetValue, normalizedSubjectValue),
+      subjectType,
+      subjectValue: normalizedSubjectValue,
+      metric,
+      baselineValue: null,
+      targetValue,
+      period: goalMetrics[metric].defaultPeriod,
+      createdAt: now,
+      updatedAt: now,
+    })
   })
-  redirect(`/dashboard/sites/${siteId}/goals/${goalId}`)
+  redirect(`/dashboard/sites/${siteId}/goals#goal-${goalId}`)
 }
 
 export async function deleteGoal(formData: FormData): Promise<void> {

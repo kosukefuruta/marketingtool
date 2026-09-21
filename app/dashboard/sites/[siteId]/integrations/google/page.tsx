@@ -3,10 +3,10 @@ import { headers } from "next/headers"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { GoogleDataConnect } from "@/components/google-data-connect"
+import { GooglePropertyForm } from "@/components/google-property-form"
 import { db } from "@/lib/db"
 import { account, site } from "@/lib/db/schema"
 import { GOOGLE_DATA_SCOPES, loadGoogleProperties } from "@/lib/google-data"
-import { searchConsoleSiteMatches } from "@/lib/google-property-match"
 import { requireSession } from "@/lib/session"
 
 export default async function GoogleIntegrationPage({ params, searchParams }: {
@@ -42,19 +42,16 @@ export default async function GoogleIntegrationPage({ params, searchParams }: {
       {loadError && <p className="error" role="alert">{loadError} 権限を再設定してください。</p>}
       <GoogleDataConnect siteId={siteId} connected={connected} />
     </section>
-    {data && <>
-      <section className="card stack"><h2>Search Console</h2>
-        {data.searchConsoleError ? <p className="error" role="alert">{data.searchConsoleError}</p> : data.searchConsoleSites.length ? <div className="goal-list">{data.searchConsoleSites.map((item) => <div className="goal-card" key={item.siteUrl}>
-          <div><strong>{item.siteUrl}</strong><p className="muted">権限: {item.permissionLevel}</p></div>
-          {searchConsoleSiteMatches(item.siteUrl, registeredSite.normalizedOrigin) && <span className="status-label">登録サイトと一致</span>}
-        </div>)}</div> : <p className="muted">利用可能なSearch Consoleプロパティがありません。</p>}
-      </section>
-      <section className="card stack"><h2>Google Analytics 4</h2>
-        {data.analyticsError ? <p className="error" role="alert">{data.analyticsError}</p> : data.analyticsProperties.length ? <div className="goal-list">{data.analyticsProperties.map((item) => <div className="goal-card" key={item.property}>
-          <strong>{item.displayName}</strong><p className="muted">{item.accountName} / {item.property}</p>
-        </div>)}</div> : <p className="muted">利用可能なGA4プロパティがありません。</p>}
-      </section>
-    </>}
+    {data && <GooglePropertyForm
+      siteId={siteId}
+      siteOrigin={registeredSite.normalizedOrigin}
+      searchConsoleSites={data.searchConsoleSites}
+      analyticsProperties={data.analyticsProperties}
+      searchConsoleError={data.searchConsoleError}
+      analyticsError={data.analyticsError}
+      selectedSearchConsole={registeredSite.searchConsoleProperty}
+      selectedAnalytics={registeredSite.ga4Property}
+    />}
     <Link href={`/dashboard/sites/${siteId}/settings`}>サイト設定へ戻る</Link>
   </div>
 }
