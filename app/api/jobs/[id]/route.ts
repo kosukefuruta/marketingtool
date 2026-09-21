@@ -25,5 +25,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     progress: persisted.progress ?? undefined,
     error: persisted.error ?? undefined,
     reportUrl: persisted.status === "done" ? `/api/jobs/${id}/report` : undefined,
+    resultUrl: persisted.status === "done" ? `/dashboard/sites/${persisted.siteId}/audits/${id}` : undefined,
   }, { headers: { "cache-control": "no-store" } })
 }

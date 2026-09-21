@@ -4,7 +4,7 @@ import { DeleteGoalForm } from "@/components/delete-goal-form"
 import { GoalForm } from "@/components/goal-form"
 import { db } from "@/lib/db"
 import { goal, site } from "@/lib/db/schema"
-import { formatGoalValue, goalMetrics, goalPeriods, goalSubjects, isGoalMetric, isGoalPeriod, isGoalSubject } from "@/lib/goals"
+import { formatGoalValue, goalMetrics, goalSubjects, isGoalMetric, isGoalPeriod, isGoalSubject } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
 
 export default async function SiteGoalsPage({ params }: { params: Promise<{ siteId: string }> }) {
@@ -28,14 +28,14 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
         const metric = isGoalMetric(item.metric) ? item.metric : null
         const period = isGoalPeriod(item.period) ? item.period : null
         const subject = isGoalSubject(item.subjectType) ? item.subjectType : null
+        const periodLabel = period === "monthly" ? "月間目標" : period === "weekly" ? "週間目標" : period === "daily" ? "日間目標" : "目標値"
         return <article className="goal-card" key={item.id}>
           <h3>{item.name}</h3>
           <dl className="detail-grid">
             <div><dt>指標</dt><dd>{metric ? goalMetrics[metric].label : item.metric}</dd></div>
-            <div><dt>対象</dt><dd>{subject ? goalSubjects[subject] : item.subjectType}{item.subjectValue ? `: ${item.subjectValue}` : ""}</dd></div>
-            <div><dt>現在値</dt><dd>{item.baselineValue === null ? "未入力" : metric ? formatGoalValue(metric, item.baselineValue) : item.baselineValue}</dd></div>
-            <div><dt>目標値</dt><dd><strong>{metric && goalMetrics[metric].direction === "decrease" ? "≤ " : "≥ "}{metric ? formatGoalValue(metric, item.targetValue) : item.targetValue}</strong></dd></div>
-            <div><dt>集計期間</dt><dd>{period ? goalPeriods[period] : item.period}</dd></div>
+            {item.subjectValue && <div><dt>{subject ? goalSubjects[subject] : "対象"}</dt><dd>{item.subjectValue}</dd></div>}
+            {item.baselineValue !== null && <div><dt>現在値</dt><dd>{metric ? formatGoalValue(metric, item.baselineValue) : item.baselineValue}</dd></div>}
+            <div><dt>{periodLabel}</dt><dd><strong>{metric && goalMetrics[metric].direction === "decrease" ? "≤ " : "≥ "}{metric ? formatGoalValue(metric, item.targetValue) : item.targetValue}</strong></dd></div>
           </dl>
           <DeleteGoalForm goalId={item.id} goalName={item.name} siteId={siteId} />
         </article>

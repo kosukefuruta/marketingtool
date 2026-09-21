@@ -1,8 +1,10 @@
 "use client"
 
 import { Fragment, useEffect, useRef, useState } from "react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
 
-type JobResponse = { status: string; progress?: string; error?: string; reportUrl?: string }
+type JobResponse = { status: string; progress?: string; error?: string; reportUrl?: string; resultUrl?: string }
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -52,6 +54,7 @@ type AuditFormProps = {
   maxPages?: number
   defaultMaxPages?: number
   initialStatusUrl?: string
+  resultBehavior?: "inline" | "link"
 }
 
 export function AuditForm({
@@ -60,10 +63,13 @@ export function AuditForm({
   maxPages = 10,
   defaultMaxPages = 10,
   initialStatusUrl,
+  resultBehavior = "inline",
 }: AuditFormProps = {}) {
+  const router = useRouter()
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<string | null>(null)
+  const [resultUrl, setResultUrl] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const pollController = useRef<AbortController | null>(null)
 
@@ -79,6 +85,10 @@ export function AuditForm({
         if (!statusResponse.ok) throw new Error(job.error ?? "診断状況を取得できませんでした。")
         if (job.status === "error") throw new Error(job.error ?? "診断に失敗しました。")
         if (job.status !== "done") { setStatus(job.progress ?? "診断中です。"); await wait(2000); continue }
+        if (resultBehavior === "link") {
+          if (!job.resultUrl) throw new Error("診断結果が見つかりません。")
+          setResultUrl(job.resultUrl); setStatus("診断が完了しました。"); router.refresh(); break
+        }
         if (!job.reportUrl) throw new Error("レポートが見つかりません。")
         const reportResponse = await fetch(job.reportUrl, { cache: "no-store", signal: controller.signal })
         if (!reportResponse.ok) throw new Error("レポートを取得できませんでした。")
@@ -98,7 +108,7 @@ export function AuditForm({
   }, [initialStatusUrl])
 
   async function submit(formData: FormData) {
-    setRunning(true); setError(null); setReport(null); setStatus("診断の準備中です。")
+    setRunning(true); setError(null); setReport(null); setResultUrl(null); setStatus("診断の準備中です。")
     try {
       const response = await fetch(endpoint, { method: "POST", body: formData })
       const started = await response.json() as { statusUrl?: string; error?: string }
@@ -118,6 +128,7 @@ export function AuditForm({
       <button className="button" disabled={running}>{running ? "診断中です" : "診断を開始"}</button>
     </form>
     {status && <p className="status" aria-live="polite">{status}</p>}
+    {resultUrl && <Link className="button" href={resultUrl}>診断結果を見る</Link>}
     {error && <p className="error" role="alert">{error}</p>}
     {report && <MarkdownReport markdown={report} />}
   </section>

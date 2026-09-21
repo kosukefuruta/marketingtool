@@ -3,6 +3,7 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { AuditForm } from "@/components/audit-form"
 import { auditHistoryVisible } from "@/lib/audit-history-access"
+import { summarizeAudit } from "@/lib/audit-summary"
 import { db } from "@/lib/db"
 import { auditJob, site, subscription } from "@/lib/db/schema"
 import { requireSession } from "@/lib/session"
@@ -30,6 +31,8 @@ export default async function SiteAuditsPage({ params, searchParams }: { params:
     canViewHistory ? db.select({
       id: auditJob.id, status: auditJob.status, createdAt: auditJob.createdAt,
       completedAt: auditJob.completedAt, auditedPages: auditJob.auditedPages,
+      goodCount: auditJob.goodCount, reviewCount: auditJob.reviewCount,
+      improveCount: auditJob.improveCount, unreachableCount: auditJob.unreachableCount,
     }).from(auditJob).where(and(eq(auditJob.siteId, siteId), eq(auditJob.userId, current.user.id)))
       .orderBy(desc(auditJob.createdAt), desc(auditJob.id)).limit(pageSize + 1).offset((page - 1) * pageSize) : [],
     paid ? db.select({ id: auditJob.id }).from(auditJob).where(and(
@@ -42,13 +45,13 @@ export default async function SiteAuditsPage({ params, searchParams }: { params:
 
   return <div className="stack">
     <div><h2>サイト診断</h2><p className="muted">登録サイトを巡回し、ページごとの技術SEO項目を分析します。</p></div>
-    {paid ? <AuditForm endpoint="/api/dashboard/audit" siteUrl={registeredSite.normalizedOrigin} maxPages={PAID_MAX_PAGES} defaultMaxPages={100} initialStatusUrl={activeJob ? `/api/jobs/${activeJob.id}` : undefined} /> : <section className="card stack">
+    {paid ? <AuditForm endpoint="/api/dashboard/audit" siteUrl={registeredSite.normalizedOrigin} maxPages={PAID_MAX_PAGES} defaultMaxPages={100} initialStatusUrl={activeJob ? `/api/jobs/${activeJob.id}` : undefined} resultBehavior="link" /> : <section className="card stack">
       <p>サイト分析を実行するには有料プランの契約が必要です。</p><Link className="button" href="/pricing">料金を見る</Link>
     </section>}
     {canViewHistory && <section className="card stack">
       <h2>診断履歴</h2>
-      {visibleJobs.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>開始日時</th><th>状態</th><th>ページ数</th><th>結果</th></tr></thead><tbody>
-        {visibleJobs.map((job) => <tr key={job.id}><td>{job.createdAt.toLocaleString("ja-JP")}</td><td>{job.status}</td><td>{job.auditedPages ?? "—"}</td><td><Link href={`${base}/${job.id}`}>詳細</Link></td></tr>)}
+      {visibleJobs.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>開始日時</th><th>状態</th><th>ページ数</th><th>概要</th><th>結果</th></tr></thead><tbody>
+        {visibleJobs.map((job) => <tr key={job.id}><td>{job.createdAt.toLocaleString("ja-JP")}</td><td>{job.status}</td><td>{job.auditedPages ?? "—"}</td><td>{summarizeAudit(job)}</td><td><Link href={`${base}/${job.id}`}>詳細</Link></td></tr>)}
       </tbody></table></div> : <p className="muted">診断履歴はまだありません。</p>}
       <div className="nav-links">{page > 1 && <Link href={`${base}?page=${page - 1}`}>新しい履歴へ</Link>}{hasNextPage && <Link href={`${base}?page=${page + 1}`}>古い履歴へ</Link>}</div>
     </section>}
