@@ -1,10 +1,12 @@
-import { and, asc, eq, inArray } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull } from "drizzle-orm"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { db } from "@/lib/db"
-import { auditCheck, auditJob, auditPage, site } from "@/lib/db/schema"
-import { canViewAuditHistory } from "@/lib/dashboard-audits"
+import { auditCheck, auditPage } from "@/lib/db/schema"
+import { loadOwnedAuditJob } from "@/lib/dashboard-audits"
 import { requireSession } from "@/lib/session"
+
+const PAGE_SIZE = 50
 
 export default async function AuditDetailPage({ params, searchParams }: {
   params: Promise<{ id: string }>
@@ -15,41 +17,58 @@ export default async function AuditDetailPage({ params, searchParams }: {
   const query = await searchParams
   const requestedPage = Number(query.page ?? "1")
   const page = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1
-  const pageSize = 100
-  const [[job], canView] = await Promise.all([
-    db.select().from(auditJob).innerJoin(site, eq(auditJob.siteId, site.id))
-      .where(and(eq(auditJob.id, id), eq(site.userId, current.user.id))).limit(1),
-    canViewAuditHistory(current.user.id),
-  ])
-  if (!job || !canView) notFound()
+  const job = await loadOwnedAuditJob(id, current.user.id)
+  if (!job) notFound()
 
-  const checkRows = await db.select().from(auditCheck).where(eq(auditCheck.jobId, id))
-    .orderBy(asc(auditCheck.position), asc(auditCheck.id))
-    .limit(pageSize + 1).offset((page - 1) * pageSize)
-  const hasNextPage = checkRows.length > pageSize
-  const checks = checkRows.slice(0, pageSize)
-  const pageIds = [...new Set(checks.flatMap((check) => check.pageId ? [check.pageId] : []))]
-  const pages = pageIds.length ? await db.select().from(auditPage).where(inArray(auditPage.id, pageIds)) : []
-  const pageUrls = new Map(pages.map((result) => [result.id, result.url]))
+  const [pageRows, siteChecks] = await Promise.all([
+    db.select().from(auditPage).where(eq(auditPage.jobId, id)).orderBy(asc(auditPage.url), asc(auditPage.id))
+      .limit(PAGE_SIZE + 1).offset((page - 1) * PAGE_SIZE),
+    db.select().from(auditCheck).where(and(eq(auditCheck.jobId, id), isNull(auditCheck.pageId)))
+      .orderBy(asc(auditCheck.position), asc(auditCheck.id)),
+  ])
+  const hasNextPage = pageRows.length > PAGE_SIZE
+  const pages = pageRows.slice(0, PAGE_SIZE)
+  const pageIds = pages.map((item) => item.id)
+  const pageChecks = pageIds.length ? await db.select({ pageId: auditCheck.pageId, evaluation: auditCheck.evaluation })
+    .from(auditCheck).where(and(eq(auditCheck.jobId, id), inArray(auditCheck.pageId, pageIds))) : []
+  const counts = new Map<string, { good: number; review: number; improve: number; unreachable: number }>()
+  for (const check of pageChecks) {
+    if (!check.pageId) continue
+    const value = counts.get(check.pageId) ?? { good: 0, review: 0, improve: 0, unreachable: 0 }
+    if (check.evaluation === "良好") value.good += 1
+    else if (check.evaluation === "要確認") value.review += 1
+    else if (check.evaluation === "要改善") value.improve += 1
+    else if (check.evaluation === "取得不能") value.unreachable += 1
+    counts.set(check.pageId, value)
+  }
+
   return <div className="stack">
-    <h1>診断詳細</h1>
+    <div><h1>診断結果</h1><p className="muted">ページ一覧から詳しい診断内容を確認できます。</p></div>
     <section className="card stack">
-      <p>状態: <strong>{job.audit_job.status}</strong></p>
-      <p>開始日時: {job.audit_job.createdAt.toLocaleString("ja-JP")}</p>
-      <p>診断ページ数: {job.audit_job.auditedPages ?? "—"}</p>
-      {job.audit_job.error && <p className="error">{job.audit_job.error}</p>}
-    </section>
-    {checks.length > 0 && <section className="card stack"><h2>構造化診断結果</h2>
-      <p>診断項目を100件ずつ表示しています。</p>
-      <table><thead><tr><th>対象</th><th>診断項目</th><th>評価</th><th>詳細</th></tr></thead><tbody>
-        {checks.map((check) => <tr key={check.id}><td>{check.pageId ? pageUrls.get(check.pageId) ?? "ページ" : "サイト全体"}</td><td>{check.item}</td><td>{check.evaluation}</td><td>{check.detail}</td></tr>)}
-      </tbody></table>
-      <div className="nav-links">
-        {page > 1 && <Link href={`/dashboard/audits/${id}?page=${page - 1}`}>前の100件</Link>}
-        {hasNextPage && <Link href={`/dashboard/audits/${id}?page=${page + 1}`}>次の100件</Link>}
+      <h2>診断概要</h2>
+      <div className="summary-grid">
+        <div><span>状態</span><strong>{job.status}</strong></div><div><span>診断ページ</span><strong>{job.auditedPages ?? "—"}</strong></div>
+        <div><span>良好</span><strong>{job.goodCount ?? "—"}</strong></div><div><span>要確認</span><strong>{job.reviewCount ?? "—"}</strong></div>
+        <div><span>要改善</span><strong>{job.improveCount ?? "—"}</strong></div><div><span>取得不能</span><strong>{job.unreachableCount ?? "—"}</strong></div>
       </div>
+      <p className="muted">開始日時: {job.createdAt.toLocaleString("ja-JP")}</p>{job.error && <p className="error">{job.error}</p>}
+    </section>
+    {siteChecks.length > 0 && <section className="card stack"><h2>サイト全体</h2>
+      <div className="data-table-wrap"><table className="data-table"><thead><tr><th>診断項目</th><th>評価</th><th>詳細</th></tr></thead><tbody>
+        {siteChecks.map((check) => <tr key={check.id}><td>{check.item}</td><td>{check.evaluation}</td><td>{check.detail}</td></tr>)}
+      </tbody></table></div>
     </section>}
-    {job.audit_job.report && <a className="button secondary" href={`/api/jobs/${id}/report`} target="_blank" rel="noreferrer">Markdownレポートを表示</a>}
+    <section className="card stack"><h2>ページ一覧</h2>
+      {pages.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>ページ</th><th>HTTP</th><th>良好</th><th>要確認</th><th>要改善</th><th>取得不能</th><th></th></tr></thead><tbody>
+        {pages.map((item) => { const count = counts.get(item.id); return <tr key={item.id}>
+          <td><span className="table-primary">{item.title || "タイトルなし"}</span><span className="table-secondary">{item.url}</span></td>
+          <td>{item.httpStatus ?? "—"}</td><td>{count?.good ?? 0}</td><td>{count?.review ?? 0}</td><td>{count?.improve ?? 0}</td><td>{count?.unreachable ?? 0}</td>
+          <td><Link href={`/dashboard/audits/${id}/pages/${item.id}?fromPage=${page}`}>詳細</Link></td>
+        </tr>})}
+      </tbody></table></div> : <p className="muted">ページの診断結果はまだありません。</p>}
+      <div className="nav-links">{page > 1 && <Link href={`/dashboard/audits/${id}?page=${page - 1}`}>前の50件</Link>}{hasNextPage && <Link href={`/dashboard/audits/${id}?page=${page + 1}`}>次の50件</Link>}</div>
+    </section>
+    {job.report && <a className="button secondary" href={`/api/jobs/${id}/report`} target="_blank" rel="noreferrer">Markdownレポートを表示</a>}
     <Link href="/dashboard/audit">サイト分析へ戻る</Link>
   </div>
 }
