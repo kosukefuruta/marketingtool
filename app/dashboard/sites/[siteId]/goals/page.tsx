@@ -3,12 +3,13 @@ import { headers } from "next/headers"
 import { notFound } from "next/navigation"
 import { DeleteGoalForm } from "@/components/delete-goal-form"
 import { GoalDriverTree } from "@/components/goal-driver-tree"
+import { GoalCtaPageForm } from "@/components/goal-cta-page-form"
 import { GoalForm } from "@/components/goal-form"
 import { GoalKeyEventForm } from "@/components/goal-key-event-form"
 import { GoalPageRpmForm } from "@/components/goal-page-rpm-form"
 import { GoalScenarios } from "@/components/goal-scenarios"
 import { db } from "@/lib/db"
-import { account, goal, goalKeyEvent, site } from "@/lib/db/schema"
+import { account, goal, goalCtaPage, goalKeyEvent, site } from "@/lib/db/schema"
 import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent } from "@/lib/google-data"
 import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
 import { buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
@@ -27,6 +28,9 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
   if (!registeredSite) notFound()
   const savedKeyEvents = goals.length > 0
     ? await db.select().from(goalKeyEvent).where(inArray(goalKeyEvent.goalId, goals.map((item) => item.id)))
+    : []
+  const savedCtaPages = goals.length > 0
+    ? await db.select().from(goalCtaPage).where(inArray(goalCtaPage.goalId, goals.map((item) => item.id))).orderBy(asc(goalCtaPage.createdAt))
     : []
   const siteCategory = registeredSite.category && isSiteCategory(registeredSite.category) ? registeredSite.category : null
   const rankingKeywords = goals.filter((item) => item.metric === "averagePosition" && item.subjectValue).map((item) => item.subjectValue!)
@@ -89,6 +93,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
         const metricActual = metric ? googleValueForGoal(metric, actuals) : null
         const currentActual = keywordActual ?? metricActual
         const selectedKeyEvents = groupGoalKeyEvents(savedKeyEvents.filter((entry) => entry.goalId === item.id))
+        const ctaPaths = savedCtaPages.filter((entry) => entry.goalId === item.id).map((entry) => entry.path)
         return <article className="goal-card stack" id={`goal-${item.id}`} key={item.id}>
           <h3>{item.name}</h3>
           <dl className="detail-grid">
@@ -99,6 +104,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
           </dl>
           {currentActual?.detail && <p className="muted">直近28日間: {currentActual.detail}</p>}
           {metric && keyEventStagesForMetric(metric).length > 0 && <GoalKeyEventForm siteId={siteId} goalId={item.id} metric={metric} available={availableKeyEvents} selected={selectedKeyEvents} loadError={keyEventsError} />}
+          {metric && keyEventStagesForMetric(metric).length > 0 && <GoalCtaPageForm siteId={siteId} goalId={item.id} siteOrigin={registeredSite.normalizedOrigin} paths={ctaPaths} />}
           {metric === "adRevenue" && <GoalPageRpmForm siteId={siteId} goalId={item.id} pageRpm={item.pageRpm} />}
           {breakdown ? <div className="stack">
             <div><h4>目標のブレークダウン</h4><p className="goal-formula">{breakdown.formula}</p></div>

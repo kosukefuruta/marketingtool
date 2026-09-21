@@ -5,7 +5,8 @@ import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
-import { account, auditJob, goal, goalKeyEvent, site, subscription, user } from "@/lib/db/schema"
+import { account, auditJob, goal, goalCtaPage, goalKeyEvent, site, subscription, user } from "@/lib/db/schema"
+import { parseCtaPagePaths } from "@/lib/goal-cta-pages"
 import { loadGoogleProperties } from "@/lib/google-data"
 import { goalKeyEventStages, isValidGoogleEventName, keyEventFieldName, keyEventStagesForMetric, manualKeyEventFieldName, type GoalKeyEventStage } from "@/lib/goal-key-events"
 import { searchConsoleSiteMatches } from "@/lib/google-property-match"
@@ -74,6 +75,7 @@ export async function saveSite(_state: SiteFormState, formData: FormData): Promi
 export type GoalFormState = { error?: string }
 export type GoalKeyEventFormState = { error?: string; success?: string }
 export type GoalPageRpmFormState = { error?: string; success?: string }
+export type GoalCtaPageFormState = { error?: string; success?: string }
 
 type SelectedKeyEvent = { stage: GoalKeyEventStage; eventName: string }
 
@@ -228,6 +230,34 @@ export async function saveGoalPageRpm(_state: GoalPageRpmFormState, formData: Fo
   revalidatePath(`/dashboard/sites/${siteId}/goals`)
   revalidatePath(`/dashboard/sites/${siteId}/goals/${goalId}`)
   return { success: pageRpm === null ? "手入力のページRPMを解除しました。" : "ページRPMを保存しました。" }
+}
+
+export async function saveGoalCtaPages(_state: GoalCtaPageFormState, formData: FormData): Promise<GoalCtaPageFormState> {
+  const current = await requireSession()
+  const siteId = String(formData.get("siteId") ?? "").trim()
+  const goalId = String(formData.get("goalId") ?? "").trim()
+  const input = String(formData.get("ctaPages") ?? "")
+  if (!siteId || !goalId) return { error: "目標が見つかりません。" }
+
+  const [ownedGoal] = await db.select({ id: goal.id, metric: goal.metric, origin: site.normalizedOrigin }).from(goal)
+    .innerJoin(site, eq(site.id, goal.siteId))
+    .where(and(eq(goal.id, goalId), eq(goal.siteId, siteId), eq(goal.userId, current.user.id), eq(site.userId, current.user.id))).limit(1)
+  if (!ownedGoal || (ownedGoal.metric !== "conversions" && ownedGoal.metric !== "paidContracts")) {
+    return { error: "CTAページを設定できる目標が見つかりません。" }
+  }
+  const parsed = parseCtaPagePaths(input, ownedGoal.origin)
+  if (parsed.error) return { error: parsed.error }
+
+  await db.transaction(async (tx) => {
+    await tx.delete(goalCtaPage).where(eq(goalCtaPage.goalId, goalId))
+    if (parsed.paths.length > 0) {
+      const now = new Date()
+      await tx.insert(goalCtaPage).values(parsed.paths.map((path) => ({ id: crypto.randomUUID(), goalId, path, createdAt: now })))
+    }
+  })
+  revalidatePath(`/dashboard/sites/${siteId}/goals`)
+  revalidatePath(`/dashboard/sites/${siteId}/goals/${goalId}`)
+  return { success: parsed.paths.length > 0 ? "CTAページを保存しました。" : "CTAページの設定を解除しました。" }
 }
 
 export async function saveGoalKeyEvents(_state: GoalKeyEventFormState, formData: FormData): Promise<GoalKeyEventFormState> {
