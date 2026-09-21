@@ -1,13 +1,14 @@
-import { and, eq } from "drizzle-orm"
+import { and, asc, eq } from "drizzle-orm"
 import { headers } from "next/headers"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { GoalDriverTree } from "@/components/goal-driver-tree"
+import { GoalCtaPageForm } from "@/components/goal-cta-page-form"
 import { GoalKeyEventForm } from "@/components/goal-key-event-form"
 import { GoalPageRpmForm } from "@/components/goal-page-rpm-form"
 import { GoalScenarios } from "@/components/goal-scenarios"
 import { db } from "@/lib/db"
-import { account, goal, goalKeyEvent, site } from "@/lib/db/schema"
+import { account, goal, goalCtaPage, goalKeyEvent, site } from "@/lib/db/schema"
 import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent } from "@/lib/google-data"
 import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
 import { buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
@@ -18,11 +19,12 @@ import { isSiteCategory, siteCategories } from "@/lib/site-categories"
 export default async function GoalDetailPage({ params }: { params: Promise<{ siteId: string; goalId: string }> }) {
   const current = await requireSession()
   const { siteId, goalId } = await params
-  const [[item], [registeredSite], [googleAccount], savedKeyEvents] = await Promise.all([
+  const [[item], [registeredSite], [googleAccount], savedKeyEvents, savedCtaPages] = await Promise.all([
     db.select().from(goal).where(and(eq(goal.id, goalId), eq(goal.siteId, siteId), eq(goal.userId, current.user.id))).limit(1),
     db.select().from(site).where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1),
     db.select({ accountId: account.accountId }).from(account).where(and(eq(account.userId, current.user.id), eq(account.providerId, "google"))).limit(1),
     db.select().from(goalKeyEvent).where(eq(goalKeyEvent.goalId, goalId)),
+    db.select().from(goalCtaPage).where(eq(goalCtaPage.goalId, goalId)).orderBy(asc(goalCtaPage.createdAt)),
   ])
   if (!item || !registeredSite || !isGoalMetric(item.metric)) notFound()
 
@@ -76,6 +78,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
       </div>
       {currentActual?.detail && <p className="muted">直近28日間: {currentActual.detail}</p>}
       {keyEventStagesForMetric(item.metric).length > 0 && <GoalKeyEventForm siteId={siteId} goalId={item.id} metric={item.metric} available={availableKeyEvents} selected={groupGoalKeyEvents(savedKeyEvents)} loadError={keyEventsError} />}
+      {keyEventStagesForMetric(item.metric).length > 0 && <GoalCtaPageForm siteId={siteId} goalId={item.id} siteOrigin={registeredSite.normalizedOrigin} paths={savedCtaPages.map((entry) => entry.path)} />}
       {item.metric === "adRevenue" && <GoalPageRpmForm siteId={siteId} goalId={item.id} pageRpm={item.pageRpm} />}
     </section>
     {breakdown ? <section className="card stack">

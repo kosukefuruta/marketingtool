@@ -96,6 +96,16 @@ export const goalKeyEvent = pgTable("goal_key_event", {
   uniqueIndex("goal_key_event_goal_stage_event_unique").on(table.goalId, table.stage, table.eventName),
 ])
 
+export const goalCtaPage = pgTable("goal_cta_page", {
+  id: text("id").primaryKey(),
+  goalId: text("goal_id").notNull().references(() => goal.id, { onDelete: "cascade" }),
+  path: text("path").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  index("goal_cta_page_goal_id_idx").on(table.goalId),
+  uniqueIndex("goal_cta_page_goal_path_unique").on(table.goalId, table.path),
+])
+
 export const subscription = pgTable("subscription", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().unique().references(() => user.id, { onDelete: "cascade" }),
