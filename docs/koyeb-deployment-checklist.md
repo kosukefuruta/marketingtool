@@ -36,8 +36,10 @@
 | `AWS_SES_CONFIGURATION_SET` | Owtell専用Configuration Set名 |
 | `MAIL_FROM` | `Owtell <support@tool.owtell.com>` |
 | `STRIPE_PRICE_ID` | 月額1,980円プランの本番Price ID |
+| `TRUSTED_PROXY_HEADER` | `x-forwarded-for`（Koyebが末尾へ追加する送信元IPを使用） |
 
 Koyebが与える`PORT`はアプリが自動で利用するため、通常は手動設定しない。
+`TRUSTED_PROXY_HEADER`には、利用するプロキシが保証するヘッダーだけを設定する。Koyebでは`x-forwarded-for`の末尾IPだけが真正と保証されるため、アプリも末尾を利用する。未設定または不正なIPの場合は、無料診断のレート制限上、安全側の共通キーとして扱われる。
 
 ## 外部サービス側の設定
 

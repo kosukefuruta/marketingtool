@@ -37,8 +37,6 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules",
-    "src/fetch.ts",
-    "src/gen.ts"
+    "node_modules"
   ]
 }

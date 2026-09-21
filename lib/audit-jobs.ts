@@ -10,9 +10,16 @@ const EXIT_WAIT_MS = 30_000
 export type AuditJob = {
   status: "running" | "done" | "error"
   createdAt: number
+  ownerId?: string
   progress?: string
   report?: string
   error?: string
+}
+
+type AuditJobOptions = {
+  id?: string
+  ownerId?: string
+  onChange?: (job: AuditJob) => void | Promise<void>
 }
 
 declare global {
@@ -23,6 +30,10 @@ declare global {
 
 export const auditJobs = globalThis.__auditJobs ?? new Map<string, AuditJob>()
 globalThis.__auditJobs = auditJobs
+
+export function canReadAuditJob(job: AuditJob, userId?: string): boolean {
+  return !job.ownerId || job.ownerId === userId
+}
 
 if (!globalThis.__auditCleanup) {
   globalThis.__auditCleanup = setInterval(() => {
@@ -78,21 +89,31 @@ function runAudit(url: string, max: number, output: string, onProgress: (value: 
   return { result, exited }
 }
 
-export function startAudit(url: string, max: number): string {
+export function startAudit(url: string, max: number, options: AuditJobOptions = {}): string {
   if (isAuditRunning()) throw new Error("現在、別の診断を実行中です。少し待ってから再実行してください。")
-  const id = crypto.randomUUID()
+  const id = options.id ?? crypto.randomUUID()
+  const ownerId = options.ownerId
   const output = join(tmpdir(), `seo-report-${id}.md`)
+  let changeQueue = Promise.resolve()
+  const publish = (job: AuditJob) => {
+    auditJobs.set(id, job)
+    if (options.onChange) {
+      changeQueue = changeQueue.then(() => options.onChange?.(job)).catch((error: unknown) => {
+        console.error("[audit] could not persist job state", { id, message: error instanceof Error ? error.message : String(error) })
+      })
+    }
+  }
   // Claim the slot only once the child exists: a synchronous spawn failure would otherwise hold it forever.
   const { result, exited } = runAudit(url, max, output, (progress) => {
     const job = auditJobs.get(id)
-    if (job?.status === "running") job.progress = progress
+    if (job?.status === "running") publish({ ...job, progress })
   })
-  auditJobs.set(id, { status: "running", createdAt: Date.now(), progress: "診断の準備中です。" })
+  publish({ status: "running", createdAt: Date.now(), ownerId, progress: "診断の準備中です。" })
   globalThis.__auditRunning = true
   void result.then(async () => {
-    auditJobs.set(id, { status: "done", createdAt: Date.now(), report: await readFile(output, "utf8") })
+    publish({ status: "done", createdAt: Date.now(), ownerId, report: await readFile(output, "utf8") })
   }).catch((error: unknown) => {
-    auditJobs.set(id, { status: "error", createdAt: Date.now(), error: error instanceof Error ? error.message : String(error) })
+    publish({ status: "error", createdAt: Date.now(), ownerId, error: error instanceof Error ? error.message : String(error) })
   }).finally(async () => {
     // A timeout rejects before the child is gone; releasing the slot early would let a second crawl run
     // alongside the dying one, and the file must outlive the child that is still writing to it.

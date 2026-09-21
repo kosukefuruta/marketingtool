@@ -8,6 +8,41 @@
       "when": 1789906886637,
       "tag": "0000_redundant_madame_web",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789972021520,
+      "tag": "0001_bizarre_punisher",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789972489564,
+      "tag": "0002_many_marvel_boy",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789972970072,
+      "tag": "0003_typical_nebula",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789973025807,
+      "tag": "0004_stale_hammerhead",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789973940192,
+      "tag": "0005_small_morg",
+      "breakpoints": true
     }
   ]
 }
