@@ -36,6 +36,8 @@ button { cursor: pointer; }
 .button.danger { background: var(--danger); }
 .button:disabled { opacity: .55; cursor: wait; }
 .error { color: var(--danger); }
+.auth-divider { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; }
+.auth-divider::before, .auth-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 .status { padding: 16px; border-radius: 12px; background: #f2f4f7; }
 .grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 .form-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
