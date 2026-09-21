@@ -5,6 +5,7 @@ import { DeleteGoalForm } from "@/components/delete-goal-form"
 import { GoalDriverTree } from "@/components/goal-driver-tree"
 import { GoalForm } from "@/components/goal-form"
 import { GoalKeyEventForm } from "@/components/goal-key-event-form"
+import { GoalPageRpmForm } from "@/components/goal-page-rpm-form"
 import { GoalScenarios } from "@/components/goal-scenarios"
 import { db } from "@/lib/db"
 import { account, goal, goalKeyEvent, site } from "@/lib/db/schema"
@@ -60,15 +61,17 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
   return <div className="stack">
     <div><h2>目標</h2><p className="muted">測定可能な目標を登録し、現在との差から必要な施策を逆算します。</p></div>
     {actuals && <section className="status"><strong>Google実測値</strong><div className="muted">対象期間: {actuals.period || "取得できませんでした"}</div>{actuals.errors.map((error) => <div className="error" key={error}>{error}</div>)}</section>}
-    <section className="card stack">
-      <h2>数値目標を追加</h2>
-      <GoalForm site={{
-        id: registeredSite.id,
-        name: registeredSite.name,
-        origin: registeredSite.normalizedOrigin,
-        category: registeredSite.category && isSiteCategory(registeredSite.category) ? registeredSite.category : null,
-      }} keyEvents={availableKeyEvents} keyEventsError={keyEventsError} />
-    </section>
+    <details className={`goal-add ${goals.length ? "goal-add-collapsed" : "card"}`} open={goals.length === 0}>
+      <summary>数値目標を追加</summary>
+      <div className={goals.length ? "card goal-add-content" : "goal-add-content"}>
+        <GoalForm site={{
+          id: registeredSite.id,
+          name: registeredSite.name,
+          origin: registeredSite.normalizedOrigin,
+          category: registeredSite.category && isSiteCategory(registeredSite.category) ? registeredSite.category : null,
+        }} keyEvents={availableKeyEvents} keyEventsError={keyEventsError} />
+      </div>
+    </details>
     <section className="card stack">
       <div className="section-heading"><h2>登録済みの目標</h2><span className="muted">{goals.length}件</span></div>
       {goals.length ? <div className="goal-list">{goals.map((item) => {
@@ -77,7 +80,11 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
         const subject = isGoalSubject(item.subjectType) ? item.subjectType : null
         const periodLabel = period === "monthly" ? "月間目標" : period === "weekly" ? "週間目標" : period === "daily" ? "日間目標" : "目標値"
         const breakdown = metric ? getGoalBreakdown(metric) : null
-        const scenarios = metric ? buildGoalScenarios(metric, item.targetValue, siteCategory, actuals?.observations, actuals?.numericObservations) : []
+        const scenarios = metric ? buildGoalScenarios(metric, item.targetValue, siteCategory, actuals?.observations, actuals?.numericObservations, item.pageRpm) : []
+        const currentValues = item.pageRpm === null ? actuals?.values : {
+          ...actuals?.values,
+          "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpm)}円/1,000PV`, detail: "手入力" },
+        }
         const keywordActual = metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
         const metricActual = metric ? googleValueForGoal(metric, actuals) : null
         const currentActual = keywordActual ?? metricActual
@@ -92,9 +99,10 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
           </dl>
           {currentActual?.detail && <p className="muted">直近28日間: {currentActual.detail}</p>}
           {metric && keyEventStagesForMetric(metric).length > 0 && <GoalKeyEventForm siteId={siteId} goalId={item.id} metric={metric} available={availableKeyEvents} selected={selectedKeyEvents} loadError={keyEventsError} />}
+          {metric === "adRevenue" && <GoalPageRpmForm siteId={siteId} goalId={item.id} pageRpm={item.pageRpm} />}
           {breakdown ? <div className="stack">
             <div><h4>目標のブレークダウン</h4><p className="goal-formula">{breakdown.formula}</p></div>
-            <GoalDriverTree drivers={breakdown.drivers} currentValues={actuals?.values} />
+            <GoalDriverTree drivers={breakdown.drivers} currentValues={currentValues} />
           </div> : <p className="muted">この指標のブレークダウンはまだ定義されていません。</p>}
           {scenarios.length > 0 && <div className="stack">
             <div><h4>達成シナリオ</h4><p className="muted">CTA関連は計測設定ができるまで初期仮定を使います。取得できた割合やページRPMは、データ量に応じて実測へ補正します。</p></div>

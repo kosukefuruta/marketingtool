@@ -73,6 +73,7 @@ export async function saveSite(_state: SiteFormState, formData: FormData): Promi
 
 export type GoalFormState = { error?: string }
 export type GoalKeyEventFormState = { error?: string; success?: string }
+export type GoalPageRpmFormState = { error?: string; success?: string }
 
 type SelectedKeyEvent = { stage: GoalKeyEventStage; eventName: string }
 
@@ -156,6 +157,7 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
   const metric = String(formData.get("metric") ?? "")
   const targetRaw = String(formData.get("targetValue") ?? "").trim()
   const category = String(formData.get("category") ?? "")
+  const pageRpmRaw = String(formData.get("pageRpm") ?? "").trim()
 
   if (!siteId || !isGoalMetric(metric) || !targetRaw) {
     return { error: "指標と目標値を入力してください。" }
@@ -166,8 +168,10 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
   if (metric === "adRevenue" && !isSiteCategory(category)) return { error: "サイトジャンルを選択してください。" }
   if (subjectValue.length > 200) return { error: "キーワードは200文字以内で入力してください。" }
   const targetValue = Number(targetRaw)
+  const pageRpm = pageRpmRaw ? Number(pageRpmRaw) : null
   const valueError = validateGoalValues(metric, null, targetValue)
   if (valueError) return { error: valueError }
+  if (metric === "adRevenue" && pageRpm !== null && (!Number.isFinite(pageRpm) || pageRpm <= 0)) return { error: "ページRPMは0より大きい数値で入力してください。" }
   const keyEventError = validateKeyEvents(keyEvents)
   if (keyEventError) return { error: keyEventError }
 
@@ -193,6 +197,7 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
       metric,
       baselineValue: null,
       targetValue,
+      pageRpm: metric === "adRevenue" ? pageRpm : null,
       period: goalMetrics[metric].defaultPeriod,
       createdAt: now,
       updatedAt: now,
@@ -202,6 +207,27 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
     }
   })
   redirect(`/dashboard/sites/${siteId}/goals#goal-${goalId}`)
+}
+
+export async function saveGoalPageRpm(_state: GoalPageRpmFormState, formData: FormData): Promise<GoalPageRpmFormState> {
+  const current = await requireSession()
+  const siteId = String(formData.get("siteId") ?? "").trim()
+  const goalId = String(formData.get("goalId") ?? "").trim()
+  const pageRpmRaw = String(formData.get("pageRpm") ?? "").trim()
+  const pageRpm = pageRpmRaw ? Number(pageRpmRaw) : null
+  if (!siteId || !goalId) return { error: "目標が見つかりません。" }
+  if (pageRpm !== null && (!Number.isFinite(pageRpm) || pageRpm <= 0)) return { error: "ページRPMは0より大きい数値で入力してください。" }
+
+  const [updated] = await db.update(goal).set({ pageRpm, updatedAt: new Date() }).where(and(
+    eq(goal.id, goalId),
+    eq(goal.siteId, siteId),
+    eq(goal.userId, current.user.id),
+    eq(goal.metric, "adRevenue"),
+  )).returning({ id: goal.id })
+  if (!updated) return { error: "広告収益の目標が見つかりません。" }
+  revalidatePath(`/dashboard/sites/${siteId}/goals`)
+  revalidatePath(`/dashboard/sites/${siteId}/goals/${goalId}`)
+  return { success: pageRpm === null ? "手入力のページRPMを解除しました。" : "ページRPMを保存しました。" }
 }
 
 export async function saveGoalKeyEvents(_state: GoalKeyEventFormState, formData: FormData): Promise<GoalKeyEventFormState> {

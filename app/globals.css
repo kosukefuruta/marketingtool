@@ -46,6 +46,17 @@ button { cursor: pointer; }
 .grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 .form-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .goal-list { display: grid; gap: 16px; }
+.goal-add summary { width: fit-content; cursor: pointer; color: var(--brand); font-weight: 700; }
+.goal-add.card > summary { color: var(--text); font-size: 24px; }
+.goal-add[open] > summary { margin-bottom: 16px; }
+.goal-add-collapsed:not([open]) { justify-self: start; }
+.goal-add-collapsed > summary { list-style: none; }
+.goal-add-collapsed > summary::-webkit-details-marker { display: none; }
+.goal-add-collapsed > summary::before { content: "＋ "; }
+.goal-add-collapsed[open] > summary::before { content: "− "; }
+.goal-add-collapsed .goal-add-content { margin-top: 8px; }
+.goal-inline-editor > summary { width: fit-content; cursor: pointer; color: var(--brand); font-weight: 700; }
+.goal-inline-editor-content { margin-top: 12px; }
 .goal-card { display: grid; gap: 16px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
 .goal-card h3, .goal-card p { margin: 0; }
 .goal-formula { margin: 0; padding: 14px 16px; border-radius: 10px; background: #eff4ff; color: #1849a9; font-weight: 700; }

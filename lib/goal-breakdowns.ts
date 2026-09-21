@@ -105,7 +105,7 @@ function updatedRates(initial: [number, number, number], observation?: RateObser
   return estimate ? [estimate.low, estimate.median, estimate.high] : initial
 }
 
-export function buildGoalScenarios(metric: GoalMetric, target: number, category?: SiteCategory | null, observations: Record<string, RateObservation> = {}, numericObservations: Record<string, NumericObservation> = {}): GoalScenario[] {
+export function buildGoalScenarios(metric: GoalMetric, target: number, category?: SiteCategory | null, observations: Record<string, RateObservation> = {}, numericObservations: Record<string, NumericObservation> = {}, manualPageRpm?: number | null): GoalScenario[] {
   if (metric === "conversions") {
     const ctaRates = updatedRates([0.02, 0.03, 0.05], observations["cta-rate"])
     const conversionRates = updatedRates([0.005, 0.01, 0.02], observations["cta-cvr"])
@@ -143,6 +143,9 @@ export function buildGoalScenarios(metric: GoalMetric, target: number, category?
     })
   }
   if (metric === "adRevenue" && category) {
+    const validManualPageRpm = manualPageRpm !== null && manualPageRpm !== undefined && Number.isFinite(manualPageRpm) && manualPageRpm > 0
+      ? manualPageRpm
+      : null
     const candidateRpm = numericObservations["page-rpm"]
     const measuredRpm = candidateRpm
       && Number.isFinite(candidateRpm.value) && candidateRpm.value >= 0
@@ -150,12 +153,14 @@ export function buildGoalScenarios(metric: GoalMetric, target: number, category?
       ? candidateRpm : null
     return scenarioLabels.map(({ id, label }, index) => {
       const initialRpm = siteCategories[category].rpm[index]
-      const rpm = measuredRpm
+      const rpm = validManualPageRpm !== null
+        ? validManualPageRpm
+        : measuredRpm
         ? (1 - measuredRpm.weight) * initialRpm + measuredRpm.weight * measuredRpm.value
         : initialRpm
       return {
         id, label,
-        assumptions: [{ label: measuredRpm ? `ページRPM（実測補正 ${Math.round(measuredRpm.weight * 100)}%）` : "ページRPM", value: `${Math.round(rpm).toLocaleString("ja-JP")}円` }],
+        assumptions: [{ label: validManualPageRpm !== null ? "ページRPM（手入力）" : measuredRpm ? `ページRPM（実測補正 ${Math.round(measuredRpm.weight * 100)}%）` : "ページRPM", value: `${Math.round(rpm).toLocaleString("ja-JP")}円` }],
         requirements: [{ label: "ページビュー数", value: Math.ceil(target / rpm * 1000), unit: "PV/月" }],
       }
     })
