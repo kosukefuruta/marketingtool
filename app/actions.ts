@@ -4,7 +4,7 @@ import { and, count, eq, inArray, isNull, sql } from "drizzle-orm"
 import { redirect } from "next/navigation"
 import { db } from "@/lib/db"
 import { auditJob, goal, site, subscription, user } from "@/lib/db/schema"
-import { isGoalMetric, isGoalPeriod, isGoalSubject, validateGoalValues } from "@/lib/goals"
+import { goalMetrics, goalNameFor, goalSubjectForMetric, isGoalMetric, validateGoalValues } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
 import { defaultSiteName, normalizePublicSiteUrl } from "@/lib/sites"
 import { getStripe } from "@/lib/stripe"
@@ -67,54 +67,38 @@ export type GoalFormState = { error?: string }
 export async function createGoal(_state: GoalFormState, formData: FormData): Promise<GoalFormState> {
   const current = await requireSession()
   const siteId = String(formData.get("siteId") ?? "").trim()
-  const name = String(formData.get("name") ?? "").trim()
-  const subjectType = String(formData.get("subjectType") ?? "")
   const subjectValue = String(formData.get("subjectValue") ?? "").trim()
   const metric = String(formData.get("metric") ?? "")
-  const period = String(formData.get("period") ?? "")
-  const baselineRaw = String(formData.get("baselineValue") ?? "").trim()
   const targetRaw = String(formData.get("targetValue") ?? "").trim()
 
-  if (!siteId || !name || !isGoalSubject(subjectType) || !isGoalMetric(metric) || !isGoalPeriod(period) || !targetRaw) {
-    return { error: "サイト、対象、目標名、指標、目標値を入力してください。" }
+  if (!siteId || !isGoalMetric(metric) || !targetRaw) {
+    return { error: "指標と目標値を入力してください。" }
   }
-  if (subjectType !== "site" && !subjectValue) return { error: "キーワードまたはページURLを入力してください。" }
-  if (name.length > 120 || subjectValue.length > 2000) {
-    return { error: "入力内容が長すぎます。" }
-  }
-  const baselineValue = baselineRaw ? Number(baselineRaw) : null
+  const subjectType = goalSubjectForMetric(metric)
+  if (subjectType === "keyword" && !subjectValue) return { error: "キーワードを入力してください。" }
+  if (subjectValue.length > 200) return { error: "キーワードは200文字以内で入力してください。" }
   const targetValue = Number(targetRaw)
-  const valueError = validateGoalValues(metric, baselineValue, targetValue)
+  const valueError = validateGoalValues(metric, null, targetValue)
   if (valueError) return { error: valueError }
 
-  const [ownedSite] = await db.select({ id: site.id, origin: site.normalizedOrigin }).from(site)
+  const [ownedSite] = await db.select({ id: site.id }).from(site)
     .where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1)
   if (!ownedSite) return { error: "登録サイトが見つかりません。" }
 
-  let normalizedSubjectValue: string | null = subjectType === "site" ? null : subjectValue
-  if (subjectType === "page") {
-    let parsed: URL
-    try {
-      parsed = new URL(subjectValue)
-    } catch {
-      return { error: "対象ページには正しいURLを入力してください。" }
-    }
-    if (parsed.origin !== ownedSite.origin) return { error: "対象ページは選択したサイト内のURLを入力してください。" }
-    normalizedSubjectValue = parsed.href
-  }
+  const normalizedSubjectValue = subjectType === "keyword" ? subjectValue : null
 
   const now = new Date()
   await db.insert(goal).values({
     id: crypto.randomUUID(),
     userId: current.user.id,
     siteId,
-    name,
+    name: goalNameFor(metric, targetValue, normalizedSubjectValue),
     subjectType,
     subjectValue: normalizedSubjectValue,
     metric,
-    baselineValue,
+    baselineValue: null,
     targetValue,
-    period,
+    period: goalMetrics[metric].defaultPeriod,
     createdAt: now,
     updatedAt: now,
   })
