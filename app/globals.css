@@ -37,10 +37,27 @@ button { cursor: pointer; }
 .error { color: var(--danger); }
 .status { padding: 16px; border-radius: 12px; background: #f2f4f7; }
 .grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.summary-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+.summary-grid div { display: grid; gap: 2px; padding: 12px; border-radius: 10px; background: #f2f4f7; }
+.summary-grid span, dt { color: var(--muted); font-size: 13px; }
+.summary-grid strong { font-size: 22px; }
+.data-table-wrap { max-width: 100%; overflow-x: auto; }
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th, .data-table td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.data-table th { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.table-primary, .table-secondary { display: block; }
+.table-primary { font-weight: 650; }
+.table-secondary, .url-text { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 0; }
+.detail-grid div { min-width: 0; }
+.detail-grid dt { margin-bottom: 3px; }
+.detail-grid dd { margin: 0; overflow-wrap: anywhere; }
+.detail-wide { grid-column: 1 / -1; }
 .report { margin-top: 28px; overflow-wrap: anywhere; }
 .report table { width: 100%; border-collapse: collapse; margin: 12px 0 28px; }
 .report th, .report td { border: 1px solid var(--line); padding: 10px; text-align: left; vertical-align: top; }
 .report th { background: #f2f4f7; }
 .report code { padding: 2px 5px; border-radius: 4px; background: #f2f4f7; }
 .footer { border-top: 1px solid var(--line); padding: 28px 0; color: var(--muted); font-size: 14px; }
-@media (max-width: 560px) { .nav { align-items: flex-start; padding: 14px 0; } .nav-links { flex-wrap: wrap; justify-content: flex-end; } .brand small { display: none; } .main { padding-top: 24px; } .card { padding: 18px; } }
+@media (max-width: 560px) { .nav { align-items: flex-start; padding: 14px 0; } .nav-links { flex-wrap: wrap; justify-content: flex-end; } .brand small { display: none; } .main { padding-top: 24px; } .card { padding: 18px; } .detail-grid { grid-template-columns: 1fr 1fr; } }
