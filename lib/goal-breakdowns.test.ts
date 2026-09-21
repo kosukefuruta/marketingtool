@@ -29,6 +29,7 @@ describe("goal breakdown definitions", () => {
     const standard = buildGoalScenarios("paidContracts", 10).find((scenario) => scenario.id === "standard")
     expect(standard?.requirements[0]).toEqual({ label: "無料契約", value: 100, unit: "件/月" })
     expect(standard?.requirements[2]).toEqual({ label: "サイト全体流入", value: 66667, unit: "セッション/月" })
+    expect(standard?.assumptions.map((item) => item.label)).toContain("無料→有料転換率（推定）")
   })
 
   it("updates initial rate scenarios with measured numerator and denominator", () => {

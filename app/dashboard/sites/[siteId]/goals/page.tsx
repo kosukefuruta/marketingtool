@@ -10,7 +10,7 @@ import { GoalPageRpmForm } from "@/components/goal-page-rpm-form"
 import { GoalScenarios } from "@/components/goal-scenarios"
 import { db } from "@/lib/db"
 import { account, goal, goalCtaPage, goalKeyEvent, site } from "@/lib/db/schema"
-import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent } from "@/lib/google-data"
+import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent, type GoalAnalyticsConfig } from "@/lib/google-data"
 import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
 import { buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, goalSubjects, isGoalMetric, isGoalPeriod, isGoalSubject } from "@/lib/goals"
@@ -32,6 +32,18 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
   const savedCtaPages = goals.length > 0
     ? await db.select().from(goalCtaPage).where(inArray(goalCtaPage.goalId, goals.map((item) => item.id))).orderBy(asc(goalCtaPage.createdAt))
     : []
+  const analyticsGoalConfigs: GoalAnalyticsConfig[] = goals.flatMap((item) => {
+    if (item.metric !== "conversions" && item.metric !== "paidContracts") return []
+    const groupedEvents = groupGoalKeyEvents(savedKeyEvents.filter((entry) => entry.goalId === item.id))
+    return [{
+      goalId: item.id,
+      metric: item.metric,
+      ctaPaths: savedCtaPages.filter((entry) => entry.goalId === item.id).map((entry) => entry.path),
+      conversionEvents: groupedEvents.conversion,
+      freeRegistrationEvents: groupedEvents.free_registration,
+      paidContractEvents: groupedEvents.paid_contract,
+    }]
+  })
   const siteCategory = registeredSite.category && isSiteCategory(registeredSite.category) ? registeredSite.category : null
   const rankingKeywords = goals.filter((item) => item.metric === "averagePosition" && item.subjectValue).map((item) => item.subjectValue!)
   let actuals: Awaited<ReturnType<typeof loadGoogleGoalMetrics>> | null = null
@@ -43,7 +55,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
     const requestHeaders = await headers()
     const [actualResult, keyEventsResult] = await Promise.allSettled([
       canLoadActuals
-        ? loadGoogleGoalMetrics(googleAccount.accountId, requestHeaders, registeredSite.searchConsoleProperty, registeredSite.ga4Property, rankingKeywords)
+        ? loadGoogleGoalMetrics(googleAccount.accountId, requestHeaders, registeredSite.searchConsoleProperty, registeredSite.ga4Property, rankingKeywords, analyticsGoalConfigs)
         : Promise.resolve(null),
       canLoadKeyEvents
         ? loadGoogleKeyEvents(googleAccount.accountId, requestHeaders, registeredSite.ga4Property!)
@@ -51,7 +63,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
     ])
     if (actualResult.status === "fulfilled") actuals = actualResult.value
     else {
-      actuals = { values: {}, keywordValues: {}, observations: {}, numericObservations: {}, errors: ["Googleの実測値を取得できませんでした。"], period: "" }
+      actuals = { values: {}, keywordValues: {}, observations: {}, goalValues: {}, goalObservations: {}, numericObservations: {}, errors: ["Googleの実測値を取得できませんでした。"], period: "" }
     }
     if (keyEventsResult.status === "fulfilled") availableKeyEvents = keyEventsResult.value
     else {
@@ -84,14 +96,16 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
         const subject = isGoalSubject(item.subjectType) ? item.subjectType : null
         const periodLabel = period === "monthly" ? "月間目標" : period === "weekly" ? "週間目標" : period === "daily" ? "日間目標" : "目標値"
         const breakdown = metric ? getGoalBreakdown(metric) : null
-        const scenarios = metric ? buildGoalScenarios(metric, item.targetValue, siteCategory, actuals?.observations, actuals?.numericObservations, item.pageRpm) : []
-        const currentValues = item.pageRpm === null ? actuals?.values : {
+        const observations = { ...actuals?.observations, ...actuals?.goalObservations[item.id] }
+        const scenarios = metric ? buildGoalScenarios(metric, item.targetValue, siteCategory, observations, actuals?.numericObservations, item.pageRpm) : []
+        const currentValues = {
           ...actuals?.values,
-          "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpm)}円/1,000PV`, detail: "手入力" },
+          ...actuals?.goalValues[item.id],
+          ...(item.pageRpm === null ? {} : { "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpm)}円/1,000PV`, detail: "手入力" } }),
         }
         const keywordActual = metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
         const metricActual = metric ? googleValueForGoal(metric, actuals) : null
-        const currentActual = keywordActual ?? metricActual
+        const currentActual = keywordActual ?? actuals?.goalValues[item.id]?.["goal-total"] ?? metricActual
         const selectedKeyEvents = groupGoalKeyEvents(savedKeyEvents.filter((entry) => entry.goalId === item.id))
         const ctaPaths = savedCtaPages.filter((entry) => entry.goalId === item.id).map((entry) => entry.path)
         return <article className="goal-card stack" id={`goal-${item.id}`} key={item.id}>

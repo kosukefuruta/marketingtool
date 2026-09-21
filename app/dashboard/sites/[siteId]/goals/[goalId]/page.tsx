@@ -9,7 +9,7 @@ import { GoalPageRpmForm } from "@/components/goal-page-rpm-form"
 import { GoalScenarios } from "@/components/goal-scenarios"
 import { db } from "@/lib/db"
 import { account, goal, goalCtaPage, goalKeyEvent, site } from "@/lib/db/schema"
-import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent } from "@/lib/google-data"
+import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent, type GoalAnalyticsConfig } from "@/lib/google-data"
 import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
 import { buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, isGoalMetric } from "@/lib/goals"
@@ -39,9 +39,18 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
   if (canLoadActuals || canLoadKeyEvents) {
     const requestHeaders = await headers()
     const keywords = item.metric === "averagePosition" && item.subjectValue ? [item.subjectValue] : []
+    const groupedEvents = groupGoalKeyEvents(savedKeyEvents)
+    const analyticsGoalConfigs: GoalAnalyticsConfig[] = item.metric === "conversions" || item.metric === "paidContracts" ? [{
+      goalId: item.id,
+      metric: item.metric,
+      ctaPaths: savedCtaPages.map((entry) => entry.path),
+      conversionEvents: groupedEvents.conversion,
+      freeRegistrationEvents: groupedEvents.free_registration,
+      paidContractEvents: groupedEvents.paid_contract,
+    }] : []
     const [actualResult, keyEventsResult] = await Promise.allSettled([
       canLoadActuals
-        ? loadGoogleGoalMetrics(googleAccount.accountId, requestHeaders, registeredSite.searchConsoleProperty, registeredSite.ga4Property, keywords)
+        ? loadGoogleGoalMetrics(googleAccount.accountId, requestHeaders, registeredSite.searchConsoleProperty, registeredSite.ga4Property, keywords, analyticsGoalConfigs)
         : Promise.resolve(null),
       canLoadKeyEvents
         ? loadGoogleKeyEvents(googleAccount.accountId, requestHeaders, registeredSite.ga4Property!)
@@ -49,7 +58,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
     ])
     if (actualResult.status === "fulfilled") actuals = actualResult.value
     else {
-      actuals = { values: {}, keywordValues: {}, observations: {}, numericObservations: {}, errors: ["Googleの実測値を取得できませんでした。"], period: "" }
+      actuals = { values: {}, keywordValues: {}, observations: {}, goalValues: {}, goalObservations: {}, numericObservations: {}, errors: ["Googleの実測値を取得できませんでした。"], period: "" }
     }
     if (keyEventsResult.status === "fulfilled") availableKeyEvents = keyEventsResult.value
     else {
@@ -59,18 +68,21 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
   if (keyEventStagesForMetric(item.metric).length > 0 && !canLoadKeyEvents) {
     keyEventsError = "GA4プロパティを接続するとキーイベントを選択できます。"
   }
-  const scenarios = buildGoalScenarios(item.metric, item.targetValue, category, actuals?.observations, actuals?.numericObservations, item.pageRpm)
-  const currentValues = item.pageRpm === null ? actuals?.values : {
+  const observations = { ...actuals?.observations, ...actuals?.goalObservations[item.id] }
+  const scenarios = buildGoalScenarios(item.metric, item.targetValue, category, observations, actuals?.numericObservations, item.pageRpm)
+  const currentValues = {
     ...actuals?.values,
-    "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpm)}円/1,000PV`, detail: "手入力" },
+    ...actuals?.goalValues[item.id],
+    ...(item.pageRpm === null ? {} : { "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpm)}円/1,000PV`, detail: "手入力" } }),
   }
   const keywordActual = item.metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
-  const currentActual = keywordActual ?? googleValueForGoal(item.metric, actuals)
+  const currentActual = keywordActual ?? actuals?.goalValues[item.id]?.["goal-total"] ?? googleValueForGoal(item.metric, actuals)
+  const phase = actuals?.goalObservations[item.id] && Object.keys(actuals.goalObservations[item.id]).length > 0 ? "実測補正中" : breakdown?.phase ?? "未定義"
   return <div className="stack">
     <div><h2>{item.name}</h2><p className="muted">目標を数値ドライバーへ分解し、現在値との差から施策を考えます。</p></div>
     {actuals && <section className="status"><strong>Google実測値</strong><div className="muted">対象期間: {actuals.period || "取得できませんでした"}</div>{actuals.errors.map((error) => <div className="error" key={error}>{error}</div>)}</section>}
     <section className="card stack">
-      <div className="section-heading"><h2>最終目標</h2><span className="status-label">フェーズ: {breakdown?.phase ?? "未定義"}</span></div>
+      <div className="section-heading"><h2>最終目標</h2><span className="status-label">フェーズ: {phase}</span></div>
       <div className="summary-grid">
         <div><span>指標</span><strong>{definition.label}</strong></div>
         <div><span>目標値</span><strong>{formatGoalValue(item.metric, item.targetValue)}</strong></div>
