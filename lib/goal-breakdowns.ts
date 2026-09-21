@@ -1,4 +1,6 @@
 import type { GoalMetric } from "./goals"
+import type { NumericObservation } from "./google-data"
+import { priorFromThreePoints, updateRate } from "./bayesian-rate"
 import { siteCategories, type SiteCategory } from "./site-categories"
 
 export type GoalDriver = {
@@ -95,11 +97,20 @@ function percentage(value: number): string {
   return `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(value * 100)}%`
 }
 
-export function buildGoalScenarios(metric: GoalMetric, target: number, category?: SiteCategory | null): GoalScenario[] {
+export type RateObservation = { successes: number; trials: number }
+
+function updatedRates(initial: [number, number, number], observation?: RateObservation): [number, number, number] {
+  if (!observation) return initial
+  const estimate = updateRate(observation.successes, observation.trials, priorFromThreePoints(...initial))
+  return estimate ? [estimate.low, estimate.median, estimate.high] : initial
+}
+
+export function buildGoalScenarios(metric: GoalMetric, target: number, category?: SiteCategory | null, observations: Record<string, RateObservation> = {}, numericObservations: Record<string, NumericObservation> = {}): GoalScenario[] {
   if (metric === "conversions") {
-    const assumptions = [[0.02, 0.005], [0.03, 0.01], [0.05, 0.02]]
+    const ctaRates = updatedRates([0.02, 0.03, 0.05], observations["cta-rate"])
+    const conversionRates = updatedRates([0.005, 0.01, 0.02], observations["cta-cvr"])
     return scenarioLabels.map(({ id, label }, index) => {
-      const [ctaRate, cvr] = assumptions[index]
+      const ctaRate = ctaRates[index]; const cvr = conversionRates[index]
       return {
         id, label,
         assumptions: [{ label: "CTA到達率", value: percentage(ctaRate) }, { label: "CTAページCVR", value: percentage(cvr) }],
@@ -111,9 +122,11 @@ export function buildGoalScenarios(metric: GoalMetric, target: number, category?
     })
   }
   if (metric === "paidContracts") {
-    const assumptions = [[0.02, 0.03, 0.05], [0.03, 0.05, 0.1], [0.05, 0.1, 0.2]]
+    const ctaRates = updatedRates([0.02, 0.03, 0.05], observations["cta-rate"])
+    const freeRates = updatedRates([0.03, 0.05, 0.1], observations["free-cvr"])
+    const paidRates = updatedRates([0.05, 0.1, 0.2], observations["paid-rate"])
     return scenarioLabels.map(({ id, label }, index) => {
-      const [ctaRate, freeCvr, paidRate] = assumptions[index]
+      const ctaRate = ctaRates[index]; const freeCvr = freeRates[index]; const paidRate = paidRates[index]
       return {
         id, label,
         assumptions: [
@@ -130,11 +143,19 @@ export function buildGoalScenarios(metric: GoalMetric, target: number, category?
     })
   }
   if (metric === "adRevenue" && category) {
+    const candidateRpm = numericObservations["page-rpm"]
+    const measuredRpm = candidateRpm
+      && Number.isFinite(candidateRpm.value) && candidateRpm.value >= 0
+      && Number.isFinite(candidateRpm.weight) && candidateRpm.weight >= 0 && candidateRpm.weight <= 1
+      ? candidateRpm : null
     return scenarioLabels.map(({ id, label }, index) => {
-      const rpm = siteCategories[category].rpm[index]
+      const initialRpm = siteCategories[category].rpm[index]
+      const rpm = measuredRpm
+        ? (1 - measuredRpm.weight) * initialRpm + measuredRpm.weight * measuredRpm.value
+        : initialRpm
       return {
         id, label,
-        assumptions: [{ label: "ページRPM", value: `${rpm.toLocaleString("ja-JP")}円` }],
+        assumptions: [{ label: measuredRpm ? `ページRPM（実測補正 ${Math.round(measuredRpm.weight * 100)}%）` : "ページRPM", value: `${Math.round(rpm).toLocaleString("ja-JP")}円` }],
         requirements: [{ label: "ページビュー数", value: Math.ceil(target / rpm * 1000), unit: "PV/月" }],
       }
     })

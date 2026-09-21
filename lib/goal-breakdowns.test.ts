@@ -31,10 +31,36 @@ describe("goal breakdown definitions", () => {
     expect(standard?.requirements[2]).toEqual({ label: "サイト全体流入", value: 66667, unit: "セッション/月" })
   })
 
+  it("updates initial rate scenarios with measured numerator and denominator", () => {
+    const initial = buildGoalScenarios("conversions", 10).find((scenario) => scenario.id === "standard")!
+    const updated = buildGoalScenarios("conversions", 10, null, { "cta-rate": { successes: 500, trials: 10_000 } }).find((scenario) => scenario.id === "standard")!
+    expect(updated.assumptions[0].value).not.toBe(initial.assumptions[0].value)
+    expect(Number.parseFloat(updated.assumptions[0].value)).toBeGreaterThan(4.5)
+  })
+
   it("uses the site's genre RPM for advertising revenue", () => {
     const standard = buildGoalScenarios("adRevenue", 100000, "entertainment").find((scenario) => scenario.id === "standard")
     expect(standard?.requirements[0]).toEqual({ label: "ページビュー数", value: 250000, unit: "PV/月" })
     expect(buildGoalScenarios("adRevenue", 100000, null)).toEqual([])
+  })
+
+  it("moves advertising RPM smoothly toward a measured value", () => {
+    const standard = buildGoalScenarios("adRevenue", 100000, "entertainment", {}, {
+      "page-rpm": { value: 800, weight: 0.5 },
+    }).find((scenario) => scenario.id === "standard")
+    expect(standard?.assumptions[0]).toEqual({ label: "ページRPM（実測補正 50%）", value: "600円" })
+    expect(standard?.requirements[0]).toEqual({ label: "ページビュー数", value: 166667, unit: "PV/月" })
+  })
+
+  it("ignores invalid measured RPM values and weights", () => {
+    const negative = buildGoalScenarios("adRevenue", 100000, "entertainment", {}, {
+      "page-rpm": { value: -100, weight: 0.5 },
+    }).find((scenario) => scenario.id === "standard")
+    const excessiveWeight = buildGoalScenarios("adRevenue", 100000, "entertainment", {}, {
+      "page-rpm": { value: 800, weight: 2 },
+    }).find((scenario) => scenario.id === "standard")
+    expect(negative?.requirements[0].value).toBe(250000)
+    expect(excessiveWeight?.requirements[0].value).toBe(250000)
   })
 
   it("rejects inherited object properties as site categories", () => {
