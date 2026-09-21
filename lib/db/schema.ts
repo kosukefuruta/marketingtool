@@ -54,6 +54,7 @@ export const site = pgTable("site", {
   name: text("name").notNull(),
   inputUrl: text("input_url").notNull(),
   normalizedOrigin: text("normalized_origin").notNull(),
+  category: text("category"),
   status: text("status").notNull().default("pending"),
   ownershipStatus: text("ownership_status").notNull().default("unverified"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
