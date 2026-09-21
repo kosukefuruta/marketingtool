@@ -46,11 +46,13 @@ describe("audit job route ownership", () => {
 
   it("loads a persisted report for its owner after process memory is gone", async () => {
     mocks.getSession.mockResolvedValue({ user: { id: "owner" } })
-    mocks.loadOwnedAuditJob.mockResolvedValue({ status: "done", report: "# Persisted", progress: null, error: null })
+    mocks.loadOwnedAuditJob.mockResolvedValue({ status: "done", report: "# Persisted", progress: null, error: null, siteId: "site-1" })
     const status = await getJob(new Request("http://localhost"), context("persisted"))
     const report = await getReport(new Request("http://localhost"), context("persisted"))
     expect(status.status).toBe(200)
-    expect((await status.json()).reportUrl).toBe("/api/jobs/persisted/report")
+    const body = await status.json()
+    expect(body.reportUrl).toBe("/api/jobs/persisted/report")
+    expect(body.resultUrl).toBe("/dashboard/sites/site-1/audits/persisted")
     expect(await report.text()).toBe("# Persisted")
   })
 })
