@@ -36,10 +36,20 @@ async function googleJson<T>(url: string, accessToken: string, init?: RequestIni
 
 export type GoogleGoalValue = { value: string; detail?: string }
 export type NumericObservation = { value: number; weight: number }
+export type GoalAnalyticsConfig = {
+  goalId: string
+  metric: "conversions" | "paidContracts"
+  ctaPaths: string[]
+  conversionEvents?: string[]
+  freeRegistrationEvents?: string[]
+  paidContractEvents?: string[]
+}
 export type GoogleGoalMetrics = {
   values: Record<string, GoogleGoalValue>
   keywordValues: Record<string, GoogleGoalValue>
   observations: Record<string, RateObservation>
+  goalValues: Record<string, Record<string, GoogleGoalValue>>
+  goalObservations: Record<string, Record<string, RateObservation>>
   numericObservations: Record<string, NumericObservation>
   errors: string[]
   period: string
@@ -49,6 +59,8 @@ const GOAL_METRICS_CACHE_MS = 15 * 60 * 1000
 const PARTIAL_GOAL_METRICS_CACHE_MS = 60 * 1000
 const GOAL_METRICS_CACHE_MAX_ENTRIES = 200
 const KEYWORD_REQUEST_CONCURRENCY = 4
+const GOAL_REQUEST_CONCURRENCY = 3
+const GOAL_ANALYTICS_CONFIG_LIMIT = 10
 const RPM_PRIOR_PAGEVIEWS = 10_000
 const keyEventsCache = new Map<string, { expiresAt: number; data: AnalyticsKeyEvent[] }>()
 const EMPTY_KEY_EVENTS_CACHE_MS = 60 * 1000
@@ -98,22 +110,35 @@ function metricNumber(report: { rows?: Array<{ metricValues?: Array<{ value?: st
   return Number.isFinite(value) ? value : null
 }
 
-export async function loadGoogleGoalMetrics(providerAccountId: string, requestHeaders: Headers, searchConsoleProperty: string | null, ga4Property: string | null, targetKeywords: string[] = []): Promise<GoogleGoalMetrics> {
+export async function loadGoogleGoalMetrics(providerAccountId: string, requestHeaders: Headers, searchConsoleProperty: string | null, ga4Property: string | null, targetKeywords: string[] = [], goalConfigs: GoalAnalyticsConfig[] = []): Promise<GoogleGoalMetrics> {
   const uniqueKeywords = [...new Set(targetKeywords.map((keyword) => keyword.trim()).filter(Boolean))]
   const keywords = uniqueKeywords.slice(0, 20)
   const keywordLimitState = uniqueKeywords.length > 20 ? "truncated" : "complete"
-  const cacheKey = `${providerAccountId}\n${searchConsoleProperty ?? ""}\n${ga4Property ?? ""}\n${keywordLimitState}\n${keywords.sort().join("\n")}`
+  const allNormalizedGoalConfigs = goalConfigs.map((config) => ({
+    ...config,
+    ctaPaths: [...new Set(config.ctaPaths)].sort(),
+    conversionEvents: [...new Set(config.conversionEvents ?? [])].sort(),
+    freeRegistrationEvents: [...new Set(config.freeRegistrationEvents ?? [])].sort(),
+    paidContractEvents: [...new Set(config.paidContractEvents ?? [])].sort(),
+  }))
+  const normalizedGoalConfigs = allNormalizedGoalConfigs.slice(0, GOAL_ANALYTICS_CONFIG_LIMIT)
+  const goalConfigLimitState = allNormalizedGoalConfigs.length > GOAL_ANALYTICS_CONFIG_LIMIT ? "truncated" : "complete"
+  const cacheKey = `${providerAccountId}\n${searchConsoleProperty ?? ""}\n${ga4Property ?? ""}\n${keywordLimitState}\n${keywords.sort().join("\n")}\n${goalConfigLimitState}\n${JSON.stringify(normalizedGoalConfigs)}`
   const cached = readGoalMetricsCache(cacheKey)
   if (cached) return cached
   const token = await auth.api.getAccessToken({ body: { providerId: "google", accountId: providerAccountId }, headers: requestHeaders })
   const startDate = isoDate(29)
+  const longRateStartDate = isoDate(181)
   const endDate = isoDate(2)
   const values: Record<string, GoogleGoalValue> = {}
   const keywordValues: Record<string, GoogleGoalValue> = {}
   const observations: Record<string, RateObservation> = {}
+  const goalValues: Record<string, Record<string, GoogleGoalValue>> = {}
+  const goalObservations: Record<string, Record<string, RateObservation>> = {}
   const numericObservations: Record<string, NumericObservation> = {}
   const errors: string[] = []
   let hasApiError = false
+  let organicSessions: number | null = null
   const number = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 })
 
   const tasks: Promise<void>[] = []
@@ -180,12 +205,100 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
       })),
     }).then((report) => {
       const organic = metricNumber(report, 0)
+      organicSessions = organic ?? 0
       values["organic-sessions"] = { value: `${number.format(organic ?? 0)}セッション` }
     }).catch((error) => { hasApiError = true; errors.push(`GA4（自然検索）: ${errorMessage(error)}`) }))
+
+    type GoalCounts = {
+      cta?: number
+      conversionSessions?: number
+      freeSessions?: number
+      paidSessions?: number
+      freeLongSessions?: number
+      paidLongSessions?: number
+    }
+    const counts = new Map<string, GoalCounts>()
+    const organicFilter = { filter: { fieldName: "sessionDefaultChannelGroup", stringFilter: { matchType: "EXACT", value: "Organic Search" } } }
+    const goalRequests: Array<() => Promise<void>> = []
+    type GoalReport = { rows?: Array<{ metricValues?: Array<{ value?: string }> }> }
+    const sharedGoalReports = new Map<string, Promise<GoalReport>>()
+    const addCountTask = (
+      config: GoalAnalyticsConfig,
+      metrics: Array<"sessions" | "keyEvents">,
+      fieldName: "pagePath" | "eventName",
+      valuesToMatch: string[],
+      apply: (current: GoalCounts, report: GoalReport) => GoalCounts,
+      requestStartDate = startDate,
+      restrictToOrganic = true,
+    ) => {
+      if (valuesToMatch.length === 0) return
+      goalRequests.push(async () => {
+        try {
+          const eventFilter = { filter: { fieldName, inListFilter: { values: valuesToMatch, caseSensitive: true } } }
+          const requestBody = {
+            dateRanges: [{ startDate: requestStartDate, endDate }],
+            metrics: metrics.map((name) => ({ name })),
+            dimensionFilter: restrictToOrganic ? { andGroup: { expressions: [organicFilter, eventFilter] } } : eventFilter,
+          }
+          const requestKey = JSON.stringify(requestBody)
+          let request = sharedGoalReports.get(requestKey)
+          if (!request) {
+            request = googleJson<GoalReport>(endpoint, token.accessToken, {
+              method: "POST", headers: { "content-type": "application/json" }, body: requestKey,
+            })
+            sharedGoalReports.set(requestKey, request)
+          }
+          const report = await request
+          counts.set(config.goalId, apply(counts.get(config.goalId) ?? {}, report))
+        } catch (error) {
+          hasApiError = true
+          errors.push(`GA4（目標計測）: ${errorMessage(error)}`)
+        }
+      })
+    }
+    for (const config of normalizedGoalConfigs) {
+      addCountTask(config, ["sessions"], "pagePath", config.ctaPaths, (current, report) => ({ ...current, cta: metricNumber(report, 0) ?? 0 }))
+      if (config.metric === "conversions") {
+        addCountTask(config, ["sessions"], "eventName", config.conversionEvents, (current, report) => ({
+          ...current,
+          conversionSessions: metricNumber(report, 0) ?? 0,
+        }))
+      }
+      if (config.metric === "paidContracts") {
+        addCountTask(config, ["sessions"], "eventName", config.freeRegistrationEvents, (current, report) => ({ ...current, freeSessions: metricNumber(report, 0) ?? 0 }))
+        addCountTask(config, ["sessions"], "eventName", config.paidContractEvents, (current, report) => ({ ...current, paidSessions: metricNumber(report, 0) ?? 0 }))
+        addCountTask(config, ["sessions"], "eventName", config.freeRegistrationEvents, (current, report) => ({ ...current, freeLongSessions: metricNumber(report, 0) ?? 0 }), longRateStartDate, false)
+        addCountTask(config, ["sessions"], "eventName", config.paidContractEvents, (current, report) => ({ ...current, paidLongSessions: metricNumber(report, 0) ?? 0 }), longRateStartDate, false)
+      }
+    }
+    tasks.push(runWithConcurrency(goalRequests, GOAL_REQUEST_CONCURRENCY, async (request) => request()))
+    await Promise.all(tasks)
+    for (const config of normalizedGoalConfigs) {
+      const count = counts.get(config.goalId) ?? {}
+      const valuesForGoal: Record<string, GoogleGoalValue> = {}
+      const observationsForGoal: Record<string, RateObservation> = {}
+      const addRate = (id: string, successes: number | undefined, trials: number | null | undefined, successLabel: string, trialLabel: string) => {
+        if (successes === undefined || trials === undefined || trials === null || trials <= 0 || successes > trials) return
+        observationsForGoal[id] = { successes, trials }
+        valuesForGoal[id] = { value: `${number.format(successes / trials * 100)}%`, detail: `${successLabel} ${number.format(successes)} / ${trialLabel} ${number.format(trials)}` }
+      }
+      addRate("cta-rate", count.cta, organicSessions, "CTA到達セッション", "自然検索セッション")
+      if (config.metric === "conversions") {
+        if (count.conversionSessions !== undefined) valuesForGoal["goal-total"] = { value: `${number.format(count.conversionSessions)}件`, detail: "直近28日に自然検索経由で選択キーイベントが発生したセッション数" }
+        addRate("cta-cvr", count.conversionSessions, count.cta, "CV発生セッション", "CTA到達セッション（推定比）")
+      } else {
+        if (count.paidSessions !== undefined) valuesForGoal["goal-total"] = { value: `${number.format(count.paidSessions)}件`, detail: "直近28日に自然検索経由で有料契約キーイベントが発生したセッション数" }
+        addRate("free-cvr", count.freeSessions, count.cta, "無料登録セッション", "CTA到達セッション（推定比）")
+        addRate("paid-rate", count.paidLongSessions, count.freeLongSessions, "有料契約発生セッション（直近180日）", "無料登録発生セッション（直近180日）")
+      }
+      if (Object.keys(valuesForGoal).length > 0) goalValues[config.goalId] = valuesForGoal
+      if (Object.keys(observationsForGoal).length > 0) goalObservations[config.goalId] = observationsForGoal
+    }
   }
-  await Promise.all(tasks)
+  else await Promise.all(tasks)
   if (uniqueKeywords.length > 20) errors.push("順位を取得できる対象キーワードは先頭20件までです。")
-  const result = { values, keywordValues, observations, numericObservations, errors, period: `${startDate}〜${endDate}` }
+  if (allNormalizedGoalConfigs.length > GOAL_ANALYTICS_CONFIG_LIMIT) errors.push(`GA4の目標別計測は先頭${GOAL_ANALYTICS_CONFIG_LIMIT}件まで取得します。`)
+  const result = { values, keywordValues, observations, goalValues, goalObservations, numericObservations, errors: [...new Set(errors)], period: `${startDate}〜${endDate}` }
   writeGoalMetricsCache(cacheKey, result, hasApiError ? PARTIAL_GOAL_METRICS_CACHE_MS : GOAL_METRICS_CACHE_MS)
   return result
 }

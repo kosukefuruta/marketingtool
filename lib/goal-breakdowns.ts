@@ -43,7 +43,7 @@ const definitions: Partial<Record<GoalMetric, GoalBreakdown>> = {
         source: "GA4",
         description: "自然検索セッションのうちCTAページを閲覧した割合",
       },
-      { id: "cta-cvr", label: "CTAページCVR", unit: "%", source: "GA4イベント", description: "CTAページを閲覧したセッションがCVを完了した割合" },
+      { id: "cta-cvr", label: "CTAページCVR（推定）", unit: "%", source: "GA4イベント", description: "CTA到達セッション数に対するCV発生セッション数の推定比。両者が同一セッションとは限らない" },
     ],
   },
   paidContracts: {
@@ -52,8 +52,8 @@ const definitions: Partial<Record<GoalMetric, GoalBreakdown>> = {
     drivers: [
       organicSessions,
       { id: "cta-rate", label: "CTAページ到達率", unit: "%", source: "GA4イベント", description: "自然検索セッションから無料契約導線へ進んだ割合" },
-      { id: "free-cvr", label: "無料契約CVR", unit: "%", source: "GA4・アプリ", description: "CTAページを閲覧したセッションが無料契約した割合" },
-      { id: "paid-rate", label: "無料→有料転換率", unit: "%", source: "Stripe・アプリ", description: "無料契約から有料契約へ転換した割合" },
+      { id: "free-cvr", label: "無料契約CVR（推定）", unit: "%", source: "GA4イベント", description: "CTA到達セッション数に対する無料登録セッション数の推定比。両者が同一セッションとは限らない" },
+      { id: "paid-rate", label: "無料→有料転換率（推定）", unit: "%", source: "GA4キーイベント", description: "直近180日の無料登録イベント発生セッション数に対する有料契約イベント発生セッション数の比率。コホート転換率の代替値" },
     ],
   },
   adRevenue: {
@@ -113,7 +113,7 @@ export function buildGoalScenarios(metric: GoalMetric, target: number, category?
       const ctaRate = ctaRates[index]; const cvr = conversionRates[index]
       return {
         id, label,
-        assumptions: [{ label: "CTA到達率", value: percentage(ctaRate) }, { label: "CTAページCVR", value: percentage(cvr) }],
+        assumptions: [{ label: "CTA到達率", value: percentage(ctaRate) }, { label: "CTAページCVR（推定）", value: percentage(cvr) }],
         requirements: [
           { label: "CTAページ流入", value: Math.ceil(target / cvr), unit: "セッション/月" },
           { label: "サイト全体流入", value: Math.ceil(target / cvr / ctaRate), unit: "セッション/月" },
@@ -131,8 +131,8 @@ export function buildGoalScenarios(metric: GoalMetric, target: number, category?
         id, label,
         assumptions: [
           { label: "CTA到達率", value: percentage(ctaRate) },
-          { label: "無料契約CVR", value: percentage(freeCvr) },
-          { label: "無料→有料転換率", value: percentage(paidRate) },
+          { label: "無料契約CVR（推定）", value: percentage(freeCvr) },
+          { label: "無料→有料転換率（推定）", value: percentage(paidRate) },
         ],
         requirements: [
           { label: "無料契約", value: Math.ceil(target / paidRate), unit: "件/月" },
