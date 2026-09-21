@@ -37,7 +37,7 @@ function generateOtpOrThrottle({ email }: { email: string }): string {
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "pg", schema }),
   baseURL,
-  secret: process.env.BETTER_AUTH_SECRET ?? (isProductionBuild ? "build-only-secret-that-is-never-used-at-runtime" : undefined),
+  secret: process.env.BETTER_AUTH_SECRET || (isProductionBuild ? "build-only-secret-that-is-never-used-at-runtime" : undefined),
   advanced: {
     defaultCookieAttributes: {
       httpOnly: true,
@@ -46,6 +46,14 @@ export const auth = betterAuth({
     },
   },
   rateLimit: { enabled: false },
+  socialProviders: process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? {
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      accessType: "offline",
+      prompt: "select_account",
+    },
+  } : undefined,
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
       if (ctx.path !== "/email-otp/send-verification-otp") return

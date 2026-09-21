@@ -34,8 +34,21 @@ export function LoginForm() {
     } finally { setLoading(false) }
   }
 
+  async function signInWithGoogle() {
+    setLoading(true); setError(null)
+    try {
+      const result = await authClient.signIn.social({ provider: "google", callbackURL: "/dashboard" })
+      if (result.error) throw new Error(result.error.message ?? "Googleログインを開始できませんでした。")
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Googleログインを開始できませんでした。")
+      setLoading(false)
+    }
+  }
+
   return <div className="card narrow stack">
     <div><h1>ログイン・新規登録</h1><p className="muted">メールで届く6桁の認証コードを使用します。</p></div>
+    <button className="button secondary" type="button" disabled={loading} onClick={signInWithGoogle}>Googleで続ける</button>
+    <div className="auth-divider"><span>または</span></div>
     {step === "email" ? <>
       <label className="field">メールアドレス<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
       <button className="button" type="button" disabled={loading || !email} onClick={sendCode}>{loading ? "送信中…" : "認証コードを送る"}</button>
