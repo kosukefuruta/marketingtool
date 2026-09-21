@@ -64,6 +64,13 @@
       "when": 1789989364910,
       "tag": "0008_nifty_supernaut",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789999210611,
+      "tag": "0009_tan_sentinel",
+      "breakpoints": true
     }
   ]
 }

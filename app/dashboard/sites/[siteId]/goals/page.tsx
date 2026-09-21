@@ -1,13 +1,14 @@
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, eq, inArray } from "drizzle-orm"
 import { headers } from "next/headers"
 import { notFound } from "next/navigation"
 import { DeleteGoalForm } from "@/components/delete-goal-form"
 import { GoalDriverTree } from "@/components/goal-driver-tree"
 import { GoalForm } from "@/components/goal-form"
+import { GoalKeyEventForm } from "@/components/goal-key-event-form"
 import { GoalScenarios } from "@/components/goal-scenarios"
 import { db } from "@/lib/db"
-import { account, goal, site } from "@/lib/db/schema"
-import { googleValueForGoal, loadGoogleGoalMetrics } from "@/lib/google-data"
+import { account, goal, goalKeyEvent, site } from "@/lib/db/schema"
+import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent } from "@/lib/google-data"
 import { buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, goalSubjects, isGoalMetric, isGoalPeriod, isGoalSubject } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
@@ -22,15 +23,37 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
     db.select({ accountId: account.accountId }).from(account).where(and(eq(account.userId, current.user.id), eq(account.providerId, "google"))).limit(1),
   ])
   if (!registeredSite) notFound()
+  const savedKeyEvents = goals.length > 0
+    ? await db.select().from(goalKeyEvent).where(inArray(goalKeyEvent.goalId, goals.map((item) => item.id)))
+    : []
   const siteCategory = registeredSite.category && isSiteCategory(registeredSite.category) ? registeredSite.category : null
   const rankingKeywords = goals.filter((item) => item.metric === "averagePosition" && item.subjectValue).map((item) => item.subjectValue!)
   let actuals: Awaited<ReturnType<typeof loadGoogleGoalMetrics>> | null = null
-  if (goals.length > 0 && googleAccount && (registeredSite.searchConsoleProperty || registeredSite.ga4Property)) {
-    try {
-      actuals = await loadGoogleGoalMetrics(googleAccount.accountId, await headers(), registeredSite.searchConsoleProperty, registeredSite.ga4Property, rankingKeywords)
-    } catch {
+  let availableKeyEvents: AnalyticsKeyEvent[] = []
+  let keyEventsError: string | null = null
+  const canLoadActuals = goals.length > 0 && googleAccount && (registeredSite.searchConsoleProperty || registeredSite.ga4Property)
+  const canLoadKeyEvents = googleAccount && registeredSite.ga4Property
+  if (canLoadActuals || canLoadKeyEvents) {
+    const requestHeaders = await headers()
+    const [actualResult, keyEventsResult] = await Promise.allSettled([
+      canLoadActuals
+        ? loadGoogleGoalMetrics(googleAccount.accountId, requestHeaders, registeredSite.searchConsoleProperty, registeredSite.ga4Property, rankingKeywords)
+        : Promise.resolve(null),
+      canLoadKeyEvents
+        ? loadGoogleKeyEvents(googleAccount.accountId, requestHeaders, registeredSite.ga4Property!)
+        : Promise.resolve([] as AnalyticsKeyEvent[]),
+    ])
+    if (actualResult.status === "fulfilled") actuals = actualResult.value
+    else {
       actuals = { values: {}, keywordValues: {}, observations: {}, numericObservations: {}, errors: ["Googleの実測値を取得できませんでした。"], period: "" }
     }
+    if (keyEventsResult.status === "fulfilled") availableKeyEvents = keyEventsResult.value
+    else {
+      keyEventsError = "GA4のキーイベントを取得できませんでした。Google連携を確認してください。"
+    }
+  }
+  if (!canLoadKeyEvents) {
+    keyEventsError = "GA4プロパティを接続するとキーイベントを選択できます。"
   }
 
   return <div className="stack">
@@ -43,7 +66,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
         name: registeredSite.name,
         origin: registeredSite.normalizedOrigin,
         category: registeredSite.category && isSiteCategory(registeredSite.category) ? registeredSite.category : null,
-      }} />
+      }} keyEvents={availableKeyEvents} keyEventsError={keyEventsError} />
     </section>
     <section className="card stack">
       <div className="section-heading"><h2>登録済みの目標</h2><span className="muted">{goals.length}件</span></div>
@@ -57,6 +80,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
         const keywordActual = metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
         const metricActual = metric ? googleValueForGoal(metric, actuals) : null
         const currentActual = keywordActual ?? metricActual
+        const selectedKeyEvents = savedKeyEvents.filter((entry) => entry.goalId === item.id).map((entry) => entry.eventName)
         return <article className="goal-card stack" id={`goal-${item.id}`} key={item.id}>
           <h3>{item.name}</h3>
           <dl className="detail-grid">
@@ -66,6 +90,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
             <div><dt>{periodLabel}</dt><dd><strong>{metric && goalMetrics[metric].direction === "decrease" ? "≤ " : "≥ "}{metric ? formatGoalValue(metric, item.targetValue) : item.targetValue}</strong></dd></div>
           </dl>
           {currentActual?.detail && <p className="muted">直近28日間: {currentActual.detail}</p>}
+          {metric === "conversions" && <GoalKeyEventForm siteId={siteId} goalId={item.id} available={availableKeyEvents} selected={selectedKeyEvents} loadError={keyEventsError} />}
           {breakdown ? <div className="stack">
             <div><h4>目標のブレークダウン</h4><p className="goal-formula">{breakdown.formula}</p></div>
             <GoalDriverTree drivers={breakdown.drivers} currentValues={actuals?.values} />

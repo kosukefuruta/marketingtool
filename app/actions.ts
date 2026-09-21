@@ -5,8 +5,8 @@ import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
-import { account, auditJob, goal, site, subscription, user } from "@/lib/db/schema"
-import { loadGoogleProperties } from "@/lib/google-data"
+import { account, auditJob, goal, goalKeyEvent, site, subscription, user } from "@/lib/db/schema"
+import { loadGoogleKeyEvents, loadGoogleProperties } from "@/lib/google-data"
 import { searchConsoleSiteMatches } from "@/lib/google-property-match"
 import { goalMetrics, goalNameFor, goalSubjectForMetric, isGoalMetric, validateGoalValues } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
@@ -71,6 +71,32 @@ export async function saveSite(_state: SiteFormState, formData: FormData): Promi
 }
 
 export type GoalFormState = { error?: string }
+export type GoalKeyEventFormState = { error?: string; success?: string }
+
+function selectedKeyEvents(formData: FormData): string[] {
+  return [...new Set(formData.getAll("keyEvent").map((value) => String(value).trim()).filter(Boolean))]
+}
+
+function validateKeyEvents(eventNames: string[]): string | null {
+  if (eventNames.length > 20) return "選択できるキーイベントは20件までです。"
+  if (eventNames.some((eventName) => eventName.length > 100 || /[\u0000-\u001f\u007f]/.test(eventName))) return "正しいキーイベントを選択してください。"
+  return null
+}
+
+async function validateAvailableKeyEvents(userId: string, ga4Property: string | null, eventNames: string[]): Promise<string | null> {
+  if (eventNames.length === 0) return null
+  if (!ga4Property) return "先にGA4プロパティを接続してください。"
+  const [googleAccount] = await db.select({ accountId: account.accountId }).from(account)
+    .where(and(eq(account.userId, userId), eq(account.providerId, "google"))).limit(1)
+  if (!googleAccount) return "先にGoogleアカウントを接続してください。"
+  try {
+    const available = await loadGoogleKeyEvents(googleAccount.accountId, await headers(), ga4Property, { fresh: true })
+    const availableNames = new Set(available.map((item) => item.eventName))
+    return eventNames.every((eventName) => availableNames.has(eventName)) ? null : "GA4に存在するキーイベントを選択してください。"
+  } catch {
+    return "GA4のキーイベントを確認できませんでした。時間をおいて再度お試しください。"
+  }
+}
 
 export type GooglePropertiesFormState = { error?: string; success?: string }
 
@@ -84,7 +110,7 @@ export async function saveGoogleProperties(_state: GooglePropertiesFormState, fo
   if (!siteId || (!updatesSearchConsole && !updatesAnalytics)) return { error: "更新できるプロパティがありません。" }
 
   const [[ownedSite], [googleAccount]] = await Promise.all([
-    db.select({ id: site.id, origin: site.normalizedOrigin }).from(site).where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1),
+    db.select({ id: site.id, origin: site.normalizedOrigin, ga4Property: site.ga4Property }).from(site).where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1),
     db.select({ accountId: account.accountId }).from(account).where(and(eq(account.userId, current.user.id), eq(account.providerId, "google"))).limit(1),
   ])
   if (!ownedSite) return { error: "登録サイトが見つかりません。" }
@@ -110,9 +136,21 @@ export async function saveGoogleProperties(_state: GooglePropertiesFormState, fo
   const values: { updatedAt: Date; searchConsoleProperty?: string | null; ga4Property?: string | null } = { updatedAt: new Date() }
   if (updatesSearchConsole) values.searchConsoleProperty = searchConsoleProperty || null
   if (updatesAnalytics) values.ga4Property = ga4Property || null
-  await db.update(site).set(values).where(and(eq(site.id, siteId), eq(site.userId, current.user.id)))
+  const clearedKeyEvents = await db.transaction(async (tx) => {
+    await tx.update(site).set(values).where(and(eq(site.id, siteId), eq(site.userId, current.user.id)))
+    if (updatesAnalytics && (ga4Property || null) !== ownedSite.ga4Property) {
+      const deleted = await tx.delete(goalKeyEvent).where(inArray(
+        goalKeyEvent.goalId,
+        tx.select({ id: goal.id }).from(goal).where(and(eq(goal.siteId, siteId), eq(goal.userId, current.user.id))),
+      )).returning({ id: goalKeyEvent.id })
+      return deleted.length
+    }
+    return 0
+  })
   revalidatePath(`/dashboard/sites/${siteId}/integrations/google`)
-  return { success: "使用するGoogleプロパティを保存しました。" }
+  return { success: clearedKeyEvents > 0
+    ? `使用するGoogleプロパティを保存し、旧プロパティのCV定義${clearedKeyEvents}件を解除しました。`
+    : "使用するGoogleプロパティを保存しました。" }
 }
 
 export async function createGoal(_state: GoalFormState, formData: FormData): Promise<GoalFormState> {
@@ -122,6 +160,7 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
   const metric = String(formData.get("metric") ?? "")
   const targetRaw = String(formData.get("targetValue") ?? "").trim()
   const category = String(formData.get("category") ?? "")
+  const keyEvents = selectedKeyEvents(formData)
 
   if (!siteId || !isGoalMetric(metric) || !targetRaw) {
     return { error: "指標と目標値を入力してください。" }
@@ -133,10 +172,16 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
   const targetValue = Number(targetRaw)
   const valueError = validateGoalValues(metric, null, targetValue)
   if (valueError) return { error: valueError }
+  const keyEventError = validateKeyEvents(keyEvents)
+  if (keyEventError) return { error: keyEventError }
 
-  const [ownedSite] = await db.select({ id: site.id }).from(site)
+  const [ownedSite] = await db.select({ id: site.id, ga4Property: site.ga4Property }).from(site)
     .where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1)
   if (!ownedSite) return { error: "登録サイトが見つかりません。" }
+  if (metric === "conversions") {
+    const availabilityError = await validateAvailableKeyEvents(current.user.id, ownedSite.ga4Property, keyEvents)
+    if (availabilityError) return { error: availabilityError }
+  }
 
   const normalizedSubjectValue = subjectType === "keyword" ? subjectValue : null
 
@@ -160,8 +205,39 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
       createdAt: now,
       updatedAt: now,
     })
+    if (metric === "conversions" && keyEvents.length > 0) {
+      await tx.insert(goalKeyEvent).values(keyEvents.map((eventName) => ({ id: crypto.randomUUID(), goalId, eventName, createdAt: now })))
+    }
   })
   redirect(`/dashboard/sites/${siteId}/goals#goal-${goalId}`)
+}
+
+export async function saveGoalKeyEvents(_state: GoalKeyEventFormState, formData: FormData): Promise<GoalKeyEventFormState> {
+  const current = await requireSession()
+  const siteId = String(formData.get("siteId") ?? "").trim()
+  const goalId = String(formData.get("goalId") ?? "").trim()
+  const keyEvents = selectedKeyEvents(formData)
+  const keyEventError = validateKeyEvents(keyEvents)
+  if (!siteId || !goalId) return { error: "目標が見つかりません。" }
+  if (keyEventError) return { error: keyEventError }
+
+  const [ownedGoal] = await db.select({ id: goal.id, metric: goal.metric, ga4Property: site.ga4Property }).from(goal)
+    .innerJoin(site, eq(site.id, goal.siteId))
+    .where(and(eq(goal.id, goalId), eq(goal.siteId, siteId), eq(goal.userId, current.user.id), eq(site.userId, current.user.id))).limit(1)
+  if (!ownedGoal || ownedGoal.metric !== "conversions") return { error: "CV数の目標が見つかりません。" }
+  const availabilityError = await validateAvailableKeyEvents(current.user.id, ownedGoal.ga4Property, keyEvents)
+  if (availabilityError) return { error: availabilityError }
+
+  await db.transaction(async (tx) => {
+    await tx.delete(goalKeyEvent).where(eq(goalKeyEvent.goalId, goalId))
+    if (keyEvents.length > 0) {
+      const now = new Date()
+      await tx.insert(goalKeyEvent).values(keyEvents.map((eventName) => ({ id: crypto.randomUUID(), goalId, eventName, createdAt: now })))
+    }
+  })
+  revalidatePath(`/dashboard/sites/${siteId}/goals`)
+  revalidatePath(`/dashboard/sites/${siteId}/goals/${goalId}`)
+  return { success: "CVとして扱うキーイベントを保存しました。" }
 }
 
 export async function deleteGoal(formData: FormData): Promise<void> {
