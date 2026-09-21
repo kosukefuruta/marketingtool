@@ -3,8 +3,9 @@
 import { useActionState, useState } from "react"
 import { createGoal, type GoalFormState } from "@/app/actions"
 import { goalMetrics, type GoalMetric } from "@/lib/goals"
+import { siteCategories, type SiteCategory } from "@/lib/site-categories"
 
-type SiteOption = { id: string; name: string; origin: string }
+type SiteOption = { id: string; name: string; origin: string; category: SiteCategory | null }
 
 export function GoalForm({ site }: { site: SiteOption }) {
   const [state, action, pending] = useActionState<GoalFormState, FormData>(createGoal, {})
@@ -23,6 +24,13 @@ export function GoalForm({ site }: { site: SiteOption }) {
       </label>
       {needsKeyword && <label className="field">キーワード
         <input name="subjectValue" placeholder="SEOツール" maxLength={200} required />
+      </label>}
+      {metric === "adRevenue" && <label className="field">サイトジャンル
+        <select name="category" defaultValue={site.category ?? ""} required>
+          <option value="" disabled>選択してください</option>
+          {Object.entries(siteCategories).map(([value, category]) => <option value={value} key={value}>{category.label}</option>)}
+        </select>
+        <small className="muted">ジャンル別のページRPMから必要PVを計算します。</small>
       </label>}
       <label className="field">目標値（{definition.unit}）
         <input name="targetValue" type="number" min={needsKeyword ? 1 : 0} max={isRate ? 100 : undefined} step="any" inputMode="decimal" placeholder={needsKeyword ? "1" : "10"} required />
