@@ -52,6 +52,18 @@ describe("goal breakdown definitions", () => {
     expect(standard?.requirements[0]).toEqual({ label: "ページビュー数", value: 166667, unit: "PV/月" })
   })
 
+  it("uses a manually entered page RPM in preference to measured and category values", () => {
+    const scenarios = buildGoalScenarios("adRevenue", 100000, "entertainment", {}, {
+      "page-rpm": { value: 800, weight: 0.5 },
+    }, 500)
+    expect(scenarios.map((scenario) => scenario.assumptions[0])).toEqual([
+      { label: "ページRPM（手入力）", value: "500円" },
+      { label: "ページRPM（手入力）", value: "500円" },
+      { label: "ページRPM（手入力）", value: "500円" },
+    ])
+    expect(scenarios.map((scenario) => scenario.requirements[0].value)).toEqual([200000, 200000, 200000])
+  })
+
   it("ignores invalid measured RPM values and weights", () => {
     const negative = buildGoalScenarios("adRevenue", 100000, "entertainment", {}, {
       "page-rpm": { value: -100, weight: 0.5 },

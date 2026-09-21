@@ -4,6 +4,7 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { GoalDriverTree } from "@/components/goal-driver-tree"
 import { GoalKeyEventForm } from "@/components/goal-key-event-form"
+import { GoalPageRpmForm } from "@/components/goal-page-rpm-form"
 import { GoalScenarios } from "@/components/goal-scenarios"
 import { db } from "@/lib/db"
 import { account, goal, goalKeyEvent, site } from "@/lib/db/schema"
@@ -56,7 +57,11 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
   if (keyEventStagesForMetric(item.metric).length > 0 && !canLoadKeyEvents) {
     keyEventsError = "GA4プロパティを接続するとキーイベントを選択できます。"
   }
-  const scenarios = buildGoalScenarios(item.metric, item.targetValue, category, actuals?.observations, actuals?.numericObservations)
+  const scenarios = buildGoalScenarios(item.metric, item.targetValue, category, actuals?.observations, actuals?.numericObservations, item.pageRpm)
+  const currentValues = item.pageRpm === null ? actuals?.values : {
+    ...actuals?.values,
+    "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpm)}円/1,000PV`, detail: "手入力" },
+  }
   const keywordActual = item.metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
   const currentActual = keywordActual ?? googleValueForGoal(item.metric, actuals)
   return <div className="stack">
@@ -71,10 +76,11 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
       </div>
       {currentActual?.detail && <p className="muted">直近28日間: {currentActual.detail}</p>}
       {keyEventStagesForMetric(item.metric).length > 0 && <GoalKeyEventForm siteId={siteId} goalId={item.id} metric={item.metric} available={availableKeyEvents} selected={groupGoalKeyEvents(savedKeyEvents)} loadError={keyEventsError} />}
+      {item.metric === "adRevenue" && <GoalPageRpmForm siteId={siteId} goalId={item.id} pageRpm={item.pageRpm} />}
     </section>
     {breakdown ? <section className="card stack">
       <div><h2>目標のブレークダウン</h2><p className="goal-formula">{breakdown.formula}</p></div>
-      <GoalDriverTree drivers={breakdown.drivers} currentValues={actuals?.values} />
+      <GoalDriverTree drivers={breakdown.drivers} currentValues={currentValues} />
       <p className="muted">各データ元を連携すると現在値を取得し、目標達成に必要な値と優先する施策を計算します。</p>
     </section> : <section className="card"><h2>目標のブレークダウン</h2><p className="muted">この指標のブレークダウンはまだ定義されていません。</p></section>}
     {scenarios.length > 0 && <section className="card stack">

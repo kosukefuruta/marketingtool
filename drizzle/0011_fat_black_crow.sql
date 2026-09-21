@@ -1,0 +1,1 @@
+ALTER TABLE "goal" ADD COLUMN "page_rpm" double precision;
