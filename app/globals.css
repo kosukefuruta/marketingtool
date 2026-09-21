@@ -42,6 +42,22 @@ button { cursor: pointer; }
 .goal-list { display: grid; gap: 16px; }
 .goal-card { display: grid; gap: 16px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
 .goal-card h3, .goal-card p { margin: 0; }
+.goal-formula { margin: 0; padding: 14px 16px; border-radius: 10px; background: #eff4ff; color: #1849a9; font-weight: 700; }
+.goal-driver-tree, .goal-driver-tree ul { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.goal-driver-tree ul { margin: 12px 0 0 24px; padding-left: 20px; border-left: 2px solid var(--line); }
+.goal-driver-card { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(280px, 2fr); gap: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; }
+.goal-driver-card p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+.goal-driver-card dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 0; }
+.goal-driver-card dd { margin: 0; }
+.status-label { padding: 4px 10px; border-radius: 999px; background: #f2f4f7; color: var(--muted); font-size: 13px; }
+.scenario-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.scenario-card { display: grid; align-content: start; gap: 16px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
+.scenario-card.recommended { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand); }
+.scenario-card h3, .scenario-card p { margin: 0; }
+.scenario-card dl { display: grid; gap: 8px; margin: 8px 0 0; }
+.scenario-card dl div { display: flex; justify-content: space-between; gap: 12px; }
+.scenario-card dd { margin: 0; text-align: right; }
+.scenario-label { font-size: 13px; font-weight: 700; }
 .text-button { padding: 0; border: 0; background: transparent; color: var(--danger); text-decoration: underline; }
 .site-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
 .site-tabs a { padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px; background: white; text-decoration: none; }
@@ -76,4 +92,5 @@ button { cursor: pointer; }
 .report th { background: #f2f4f7; }
 .report code { padding: 2px 5px; border-radius: 4px; background: #f2f4f7; }
 .footer { border-top: 1px solid var(--line); padding: 28px 0; color: var(--muted); font-size: 14px; }
-@media (max-width: 560px) { .nav { align-items: flex-start; padding: 14px 0; } .nav-links { flex-wrap: wrap; justify-content: flex-end; } .brand small { display: none; } .main { padding-top: 24px; } .card { padding: 18px; } .detail-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 700px) { .scenario-grid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .nav { align-items: flex-start; padding: 14px 0; } .nav-links { flex-wrap: wrap; justify-content: flex-end; } .brand small { display: none; } .main { padding-top: 24px; } .card { padding: 18px; } .detail-grid { grid-template-columns: 1fr 1fr; } .goal-driver-card { grid-template-columns: 1fr; } .goal-driver-card dl { grid-template-columns: 1fr; } .goal-driver-tree ul { margin-left: 8px; padding-left: 12px; } }

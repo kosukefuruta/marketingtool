@@ -5,6 +5,7 @@ import { SiteForm } from "@/components/site-form"
 import { db } from "@/lib/db"
 import { site } from "@/lib/db/schema"
 import { requireSession } from "@/lib/session"
+import { isSiteCategory } from "@/lib/site-categories"
 
 export default async function SiteSettingsPage({ params, searchParams }: { params: Promise<{ siteId: string }>; searchParams: Promise<{ error?: string }> }) {
   const current = await requireSession()
@@ -17,7 +18,7 @@ export default async function SiteSettingsPage({ params, searchParams }: { param
   return <div className="stack">
     <section className="card stack">
       <div><h2>サイト設定</h2><p className="muted">サイト名を変更できます。サイトURLは変更できません。</p></div>
-      <SiteForm siteId={registeredSite.id} submitLabel="変更を保存" defaultName={registeredSite.name} defaultUrl={registeredSite.normalizedOrigin} />
+      <SiteForm siteId={registeredSite.id} submitLabel="変更を保存" defaultName={registeredSite.name} defaultUrl={registeredSite.normalizedOrigin} defaultCategory={registeredSite.category && isSiteCategory(registeredSite.category) ? registeredSite.category : null} />
     </section>
     <section className="card danger-zone stack">
       <div><h2>サイトを削除</h2><p className="muted">このサイトに紐づく目標と診断履歴もすべて削除され、元に戻せません。</p></div>

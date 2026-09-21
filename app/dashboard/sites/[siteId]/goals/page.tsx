@@ -1,4 +1,5 @@
 import { and, asc, eq } from "drizzle-orm"
+import Link from "next/link"
 import { notFound } from "next/navigation"
 import { DeleteGoalForm } from "@/components/delete-goal-form"
 import { GoalForm } from "@/components/goal-form"
@@ -37,7 +38,10 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
             {item.baselineValue !== null && <div><dt>現在値</dt><dd>{metric ? formatGoalValue(metric, item.baselineValue) : item.baselineValue}</dd></div>}
             <div><dt>{periodLabel}</dt><dd><strong>{metric && goalMetrics[metric].direction === "decrease" ? "≤ " : "≥ "}{metric ? formatGoalValue(metric, item.targetValue) : item.targetValue}</strong></dd></div>
           </dl>
-          <DeleteGoalForm goalId={item.id} goalName={item.name} siteId={siteId} />
+          <div className="section-heading">
+            <Link href={`/dashboard/sites/${siteId}/goals/${item.id}`}>ブレークダウンを見る</Link>
+            <DeleteGoalForm goalId={item.id} goalName={item.name} siteId={siteId} />
+          </div>
         </article>
       })}</div> : <p className="muted">目標はまだ登録されていません。</p>}
     </section>

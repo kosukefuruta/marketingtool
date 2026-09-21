@@ -7,6 +7,7 @@ import { auditJob, goal, site, subscription, user } from "@/lib/db/schema"
 import { goalMetrics, goalNameFor, goalSubjectForMetric, isGoalMetric, validateGoalValues } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
 import { defaultSiteName, normalizePublicSiteUrl } from "@/lib/sites"
+import { isSiteCategory } from "@/lib/site-categories"
 import { getStripe } from "@/lib/stripe"
 import { blocksNewCheckout } from "@/lib/subscription-access"
 
@@ -23,8 +24,11 @@ export async function saveSite(_state: SiteFormState, formData: FormData): Promi
   try {
     if (siteId) {
       if (!rawName) return { error: "サイト名を入力してください。" }
+      const category = String(formData.get("category") ?? "")
+      if (category && !isSiteCategory(category)) return { error: "正しいサイトジャンルを選択してください。" }
       const updated = await db.update(site).set({
         name: rawName,
+        category: category || null,
         updatedAt: now,
       }).where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).returning({ id: site.id })
       if (!updated.length) return { error: "更新するサイトが見つかりません。" }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { summarizeAudit } from "./audit-summary"
+import { summarizeAudit, summarizeCheckCounts } from "./audit-summary"
 
 describe("audit list summary", () => {
   it("shows an all-clear message when no issues were found", () => {
@@ -12,5 +12,9 @@ describe("audit list summary", () => {
 
   it("does not mistake a missing summary for an all-clear result", () => {
     expect(summarizeAudit({ status: "done", goodCount: null, reviewCount: null, improveCount: null, unreachableCount: null })).toBe("集計結果なし")
+  })
+
+  it("summarizes the checks for one page", () => {
+    expect(summarizeCheckCounts({ goodCount: 8, reviewCount: 0, improveCount: 1, unreachableCount: 0 })).toBe("要改善1件")
   })
 })

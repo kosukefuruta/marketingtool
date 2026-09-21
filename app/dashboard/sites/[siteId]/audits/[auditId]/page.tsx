@@ -4,6 +4,7 @@ import { notFound } from "next/navigation"
 import { db } from "@/lib/db"
 import { auditCheck, auditPage } from "@/lib/db/schema"
 import { loadOwnedAuditJob } from "@/lib/dashboard-audits"
+import { summarizeCheckCounts } from "@/lib/audit-summary"
 import { requireSession } from "@/lib/session"
 
 const PAGE_SIZE = 50
@@ -59,10 +60,10 @@ export default async function AuditDetailPage({ params, searchParams }: {
       </tbody></table></div>
     </section>}
     <section className="card stack"><h2>ページ一覧</h2>
-      {pages.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>ページ</th><th>HTTP</th><th>良好</th><th>要確認</th><th>要改善</th><th>取得不能</th><th></th></tr></thead><tbody>
+      {pages.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>ページ</th><th>HTTP</th><th>概要</th><th></th></tr></thead><tbody>
         {pages.map((item) => { const count = counts.get(item.id); return <tr key={item.id}>
           <td><span className="table-primary">{item.title || "タイトルなし"}</span><span className="table-secondary">{item.url}</span></td>
-          <td>{item.httpStatus ?? "—"}</td><td>{count?.good ?? 0}</td><td>{count?.review ?? 0}</td><td>{count?.improve ?? 0}</td><td>{count?.unreachable ?? 0}</td>
+          <td>{item.httpStatus ?? "—"}</td><td>{count ? summarizeCheckCounts({ goodCount: count.good, reviewCount: count.review, improveCount: count.improve, unreachableCount: count.unreachable }) : "集計結果なし"}</td>
           <td><Link href={`${base}/pages/${item.id}?fromPage=${page}`}>詳細</Link></td>
         </tr>})}
       </tbody></table></div> : <p className="muted">ページの診断結果はまだありません。</p>}
