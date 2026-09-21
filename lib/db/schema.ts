@@ -87,11 +87,12 @@ export const goal = pgTable("goal", {
 export const goalKeyEvent = pgTable("goal_key_event", {
   id: text("id").primaryKey(),
   goalId: text("goal_id").notNull().references(() => goal.id, { onDelete: "cascade" }),
+  stage: text("stage").notNull().default("conversion"),
   eventName: text("event_name").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 }, (table) => [
   index("goal_key_event_goal_id_idx").on(table.goalId),
-  uniqueIndex("goal_key_event_goal_event_unique").on(table.goalId, table.eventName),
+  uniqueIndex("goal_key_event_goal_stage_event_unique").on(table.goalId, table.stage, table.eventName),
 ])
 
 export const subscription = pgTable("subscription", {

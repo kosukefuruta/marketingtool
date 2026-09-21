@@ -8,6 +8,7 @@ import { GoalScenarios } from "@/components/goal-scenarios"
 import { db } from "@/lib/db"
 import { account, goal, goalKeyEvent, site } from "@/lib/db/schema"
 import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent } from "@/lib/google-data"
+import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
 import { buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, isGoalMetric } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
@@ -31,7 +32,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
   let availableKeyEvents: AnalyticsKeyEvent[] = []
   let keyEventsError: string | null = null
   const canLoadActuals = googleAccount && (registeredSite.searchConsoleProperty || registeredSite.ga4Property)
-  const canLoadKeyEvents = item.metric === "conversions" && googleAccount && registeredSite.ga4Property
+  const canLoadKeyEvents = keyEventStagesForMetric(item.metric).length > 0 && googleAccount && registeredSite.ga4Property
   if (canLoadActuals || canLoadKeyEvents) {
     const requestHeaders = await headers()
     const keywords = item.metric === "averagePosition" && item.subjectValue ? [item.subjectValue] : []
@@ -52,7 +53,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
       keyEventsError = "GA4のキーイベントを取得できませんでした。Google連携を確認してください。"
     }
   }
-  if (item.metric === "conversions" && !canLoadKeyEvents) {
+  if (keyEventStagesForMetric(item.metric).length > 0 && !canLoadKeyEvents) {
     keyEventsError = "GA4プロパティを接続するとキーイベントを選択できます。"
   }
   const scenarios = buildGoalScenarios(item.metric, item.targetValue, category, actuals?.observations, actuals?.numericObservations)
@@ -69,7 +70,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
         <div><span>現在値</span><strong>{currentActual?.value ?? (item.baselineValue === null ? "未取得" : formatGoalValue(item.metric, item.baselineValue))}</strong></div>
       </div>
       {currentActual?.detail && <p className="muted">直近28日間: {currentActual.detail}</p>}
-      {item.metric === "conversions" && <GoalKeyEventForm siteId={siteId} goalId={item.id} available={availableKeyEvents} selected={savedKeyEvents.map((entry) => entry.eventName)} loadError={keyEventsError} />}
+      {keyEventStagesForMetric(item.metric).length > 0 && <GoalKeyEventForm siteId={siteId} goalId={item.id} metric={item.metric} available={availableKeyEvents} selected={groupGoalKeyEvents(savedKeyEvents)} loadError={keyEventsError} />}
     </section>
     {breakdown ? <section className="card stack">
       <div><h2>目標のブレークダウン</h2><p className="goal-formula">{breakdown.formula}</p></div>
