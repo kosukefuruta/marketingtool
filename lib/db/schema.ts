@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm"
-import { boolean, index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
+import { boolean, doublePrecision, index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -50,7 +50,7 @@ export const verification = pgTable("verification", {
 
 export const site = pgTable("site", {
   id: text("id").primaryKey(),
-  userId: text("user_id").notNull().unique().references(() => user.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   inputUrl: text("input_url").notNull(),
   normalizedOrigin: text("normalized_origin").notNull(),
@@ -58,7 +58,28 @@ export const site = pgTable("site", {
   ownershipStatus: text("ownership_status").notNull().default("unverified"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
-})
+}, (table) => [
+  index("site_user_id_idx").on(table.userId),
+  uniqueIndex("site_user_origin_unique").on(table.userId, table.normalizedOrigin),
+])
+
+export const goal = pgTable("goal", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  siteId: text("site_id").notNull().references(() => site.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  subjectType: text("subject_type").notNull().default("site"),
+  subjectValue: text("subject_value"),
+  metric: text("metric").notNull(),
+  baselineValue: doublePrecision("baseline_value"),
+  targetValue: doublePrecision("target_value").notNull(),
+  period: text("period").notNull().default("monthly"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  index("goal_user_id_idx").on(table.userId),
+  index("goal_site_id_idx").on(table.siteId),
+])
 
 export const subscription = pgTable("subscription", {
   id: text("id").primaryKey(),
