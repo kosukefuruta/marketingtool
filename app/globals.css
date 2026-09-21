@@ -33,6 +33,7 @@ button { cursor: pointer; }
 .field input, .field select { width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: white; color: var(--text); }
 .button { display: inline-flex; justify-content: center; align-items: center; min-height: 44px; padding: 10px 18px; border: 0; border-radius: 10px; background: var(--brand); color: white; font-weight: 700; text-decoration: none; }
 .button.secondary { background: white; color: var(--text); border: 1px solid var(--line); }
+.button.danger { background: var(--danger); }
 .button:disabled { opacity: .55; cursor: wait; }
 .error { color: var(--danger); }
 .status { padding: 16px; border-radius: 12px; background: #f2f4f7; }
@@ -45,6 +46,13 @@ button { cursor: pointer; }
 .site-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
 .site-tabs a { padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px; background: white; text-decoration: none; }
 .site-tabs a.active { border-color: var(--brand); background: #eff4ff; color: var(--brand); font-weight: 700; }
+.site-header h1, .site-header p { margin: 0; }
+.site-header-label { font-size: 13px; }
+.site-menu { display: flex; gap: 4px; overflow-x: auto; padding: 4px; border: 1px solid var(--line); border-radius: 12px; background: white; }
+.site-menu a { flex: 0 0 auto; padding: 8px 14px; border-radius: 8px; text-decoration: none; }
+.site-menu a:hover { background: #f2f4f7; }
+.site-menu a.active { background: #eff4ff; color: var(--brand); font-weight: 700; }
+.danger-zone { border-color: #fecdca; }
 .summary-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
 .summary-grid div { display: grid; gap: 2px; padding: 12px; border-radius: 10px; background: #f2f4f7; }
 .summary-grid span, dt { color: var(--muted); font-size: 13px; }
