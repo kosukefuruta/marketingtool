@@ -28,6 +28,7 @@ FROM base AS runner
 WORKDIR /app
 COPY --from=builder --chown=pwuser:pwuser /app/.next/standalone ./
 COPY --from=builder --chown=pwuser:pwuser /app/.next/static ./.next/static
+COPY --from=builder --chown=pwuser:pwuser /app/public ./public
 COPY --from=builder --chown=pwuser:pwuser /app/.next/migrate.mjs ./migrate.mjs
 COPY --from=builder --chown=pwuser:pwuser /app/.next/audit.mjs ./audit.mjs
 COPY --from=builder --chown=pwuser:pwuser /app/.next/audit-worker.mjs ./audit-worker.mjs
