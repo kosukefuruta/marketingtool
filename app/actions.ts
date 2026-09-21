@@ -92,8 +92,9 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
   const normalizedSubjectValue = subjectType === "keyword" ? subjectValue : null
 
   const now = new Date()
+  const goalId = crypto.randomUUID()
   await db.insert(goal).values({
-    id: crypto.randomUUID(),
+    id: goalId,
     userId: current.user.id,
     siteId,
     name: goalNameFor(metric, targetValue, normalizedSubjectValue),
@@ -106,7 +107,7 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
     createdAt: now,
     updatedAt: now,
   })
-  redirect(`/dashboard/sites/${siteId}/goals`)
+  redirect(`/dashboard/sites/${siteId}/goals/${goalId}`)
 }
 
 export async function deleteGoal(formData: FormData): Promise<void> {

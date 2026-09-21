@@ -29,7 +29,7 @@ export function GoalForm({ site }: { site: SiteOption }) {
       </label>
     </div>
     <p className="muted">{definition.defaultPeriod === "monthly" ? "1か月あたりの目標として登録します。" : "目標とする時点の値として登録します。"}</p>
-    <button className="button" disabled={pending}>{pending ? "保存中…" : "数値目標を登録"}</button>
+    <button className="button" disabled={pending}>{pending ? "生成中…" : "登録してブレークダウンを表示"}</button>
     {state.error && <p className="error" role="alert">{state.error}</p>}
   </form>
 }

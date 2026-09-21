@@ -18,7 +18,7 @@ export default async function GoogleIntegrationPage({ params, searchParams }: {
   const query = await searchParams
   const [[registeredSite], [googleAccount]] = await Promise.all([
     db.select().from(site).where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1),
-    db.select({ id: account.id, scope: account.scope }).from(account).where(and(eq(account.userId, current.user.id), eq(account.providerId, "google"))).limit(1),
+    db.select({ accountId: account.accountId, scope: account.scope }).from(account).where(and(eq(account.userId, current.user.id), eq(account.providerId, "google"))).limit(1),
   ])
   if (!registeredSite) notFound()
 
@@ -28,7 +28,7 @@ export default async function GoogleIntegrationPage({ params, searchParams }: {
   let loadError: string | null = null
   if (googleAccount && connected) {
     try {
-      data = await loadGoogleProperties(googleAccount.id, await headers())
+      data = await loadGoogleProperties(googleAccount.accountId, await headers())
     } catch (error) {
       loadError = error instanceof Error ? error.message : "Google APIから情報を取得できませんでした。"
     }
