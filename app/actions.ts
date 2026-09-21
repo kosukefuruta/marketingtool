@@ -1,9 +1,9 @@
 "use server"
 
-import { and, count, eq, isNull, sql } from "drizzle-orm"
+import { and, count, eq, inArray, isNull, sql } from "drizzle-orm"
 import { redirect } from "next/navigation"
 import { db } from "@/lib/db"
-import { goal, site, subscription, user } from "@/lib/db/schema"
+import { auditJob, goal, site, subscription, user } from "@/lib/db/schema"
 import { isGoalMetric, isGoalPeriod, isGoalSubject, validateGoalValues } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
 import { defaultSiteName, normalizePublicSiteUrl } from "@/lib/sites"
@@ -19,23 +19,22 @@ export async function saveSite(_state: SiteFormState, formData: FormData): Promi
   const siteId = String(formData.get("siteId") ?? "").trim()
   const rawUrl = String(formData.get("url") ?? "")
   const rawName = String(formData.get("name") ?? "").trim()
-  let normalized: Awaited<ReturnType<typeof normalizePublicSiteUrl>>
-  try {
-    normalized = await normalizePublicSiteUrl(rawUrl)
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : "正しいサイトURLを入力してください。" }
-  }
   const now = new Date()
   try {
     if (siteId) {
+      if (!rawName) return { error: "サイト名を入力してください。" }
       const updated = await db.update(site).set({
-        name: rawName || defaultSiteName(normalized.origin),
-        inputUrl: normalized.inputUrl,
-        normalizedOrigin: normalized.origin,
+        name: rawName,
         updatedAt: now,
       }).where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).returning({ id: site.id })
       if (!updated.length) return { error: "更新するサイトが見つかりません。" }
     } else {
+      let normalized: Awaited<ReturnType<typeof normalizePublicSiteUrl>>
+      try {
+        normalized = await normalizePublicSiteUrl(rawUrl)
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : "正しいサイトURLを入力してください。" }
+      }
       const inserted = await db.transaction(async (tx) => {
         // Serialize additions for one user so concurrent submissions cannot exceed the limit.
         await tx.execute(sql`select ${user.id} from ${user} where ${user.id} = ${current.user.id} for update`)
@@ -60,7 +59,7 @@ export async function saveSite(_state: SiteFormState, formData: FormData): Promi
     }
     throw error
   }
-  redirect(siteId ? "/settings/site" : "/dashboard")
+  redirect(siteId ? `/dashboard/sites/${siteId}/settings` : "/dashboard")
 }
 
 export type GoalFormState = { error?: string }
@@ -119,14 +118,32 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
     createdAt: now,
     updatedAt: now,
   })
-  redirect("/dashboard/goals")
+  redirect(`/dashboard/sites/${siteId}/goals`)
 }
 
 export async function deleteGoal(formData: FormData): Promise<void> {
   const current = await requireSession()
   const goalId = String(formData.get("goalId") ?? "")
-  if (goalId) await db.delete(goal).where(and(eq(goal.id, goalId), eq(goal.userId, current.user.id)))
-  redirect("/dashboard/goals")
+  const requestedSiteId = String(formData.get("siteId") ?? "")
+  const [deleted] = goalId ? await db.delete(goal).where(and(eq(goal.id, goalId), eq(goal.userId, current.user.id))).returning({ siteId: goal.siteId }) : []
+  const siteId = deleted?.siteId ?? requestedSiteId
+  redirect(siteId ? `/dashboard/sites/${siteId}/goals` : "/dashboard")
+}
+
+export async function deleteSite(formData: FormData): Promise<void> {
+  const current = await requireSession()
+  const siteId = String(formData.get("siteId") ?? "").trim()
+  if (!siteId) redirect("/dashboard")
+
+  const [activeJob] = await db.select({ id: auditJob.id }).from(auditJob).where(and(
+    eq(auditJob.siteId, siteId),
+    eq(auditJob.userId, current.user.id),
+    inArray(auditJob.status, ["queued", "running"]),
+  )).limit(1)
+  if (activeJob) redirect(`/dashboard/sites/${siteId}/settings?error=audit-running`)
+
+  await db.delete(site).where(and(eq(site.id, siteId), eq(site.userId, current.user.id)))
+  redirect("/dashboard")
 }
 
 async function findOrCreateStripeCustomer(userId: string): Promise<string> {

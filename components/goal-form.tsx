@@ -6,15 +6,12 @@ import { goalMetrics, goalPeriods, goalSubjects } from "@/lib/goals"
 
 type SiteOption = { id: string; name: string; origin: string }
 
-export function GoalForm({ sites }: { sites: SiteOption[] }) {
+export function GoalForm({ site }: { site: SiteOption }) {
   const [state, action, pending] = useActionState<GoalFormState, FormData>(createGoal, {})
 
   return <form className="stack" action={action}>
-    <label className="field">対象サイト
-      <select name="siteId" required defaultValue={sites[0]?.id}>
-        {sites.map((site) => <option key={site.id} value={site.id}>{site.name}（{site.origin}）</option>)}
-      </select>
-    </label>
+    <input name="siteId" type="hidden" value={site.id} />
+    <div className="field"><span>対象サイト</span><strong>{site.name}（{site.origin}）</strong></div>
     <label className="field">目標名
       <input name="name" placeholder="自然検索セッションを月1,000にする" maxLength={120} required />
     </label>
