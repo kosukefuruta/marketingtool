@@ -4,7 +4,7 @@ vi.mock("./auth", () => ({
   auth: { api: { getAccessToken: vi.fn(async () => ({ accessToken: "test-token" })) } },
 }))
 
-import { googleValueForGoal, loadGoogleGoalMetrics, type GoogleGoalMetrics } from "./google-data"
+import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type GoogleGoalMetrics } from "./google-data"
 import { searchConsoleSiteMatches } from "./google-property-match"
 
 function jsonResponse(body: object, status = 200): Response {
@@ -67,6 +67,23 @@ describe("Google goal metrics", () => {
     const result = await loadGoogleGoalMetrics("empty-ga-account", new Headers(), null, "properties/123")
     expect(result.values["organic-sessions"]).toEqual({ value: "0セッション" })
     expect(result.errors).toEqual([])
+  })
+
+  it("loads and sorts GA4 key events", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => jsonResponse({ keyEvents: [
+      { name: "properties/123/keyEvents/2", eventName: "sign_up" },
+      { name: "properties/123/keyEvents/1", eventName: "generate_lead" },
+    ] }))
+    const result = await loadGoogleKeyEvents("key-event-account", new Headers(), "properties/123")
+    expect(result.map((item) => item.eventName)).toEqual(["generate_lead", "sign_up"])
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://analyticsadmin.googleapis.com/v1beta/properties/123/keyEvents?pageSize=200",
+      expect.objectContaining({ cache: "no-store" }),
+    )
+    await loadGoogleKeyEvents("key-event-account", new Headers(), "properties/123")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await loadGoogleKeyEvents("key-event-account", new Headers(), "properties/123", { fresh: true })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
 

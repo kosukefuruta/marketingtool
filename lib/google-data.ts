@@ -11,6 +11,7 @@ export const GOOGLE_DATA_SCOPES = [
 
 export type SearchConsoleSite = { siteUrl: string; permissionLevel: string }
 export type AnalyticsProperty = { property: string; displayName: string; account: string; accountName: string }
+export type AnalyticsKeyEvent = { name: string; eventName: string }
 export type GoogleProperties = {
   searchConsoleSites: SearchConsoleSite[]
   analyticsProperties: AnalyticsProperty[]
@@ -49,6 +50,8 @@ const PARTIAL_GOAL_METRICS_CACHE_MS = 60 * 1000
 const GOAL_METRICS_CACHE_MAX_ENTRIES = 200
 const KEYWORD_REQUEST_CONCURRENCY = 4
 const RPM_PRIOR_PAGEVIEWS = 10_000
+const keyEventsCache = new Map<string, { expiresAt: number; data: AnalyticsKeyEvent[] }>()
+const EMPTY_KEY_EVENTS_CACHE_MS = 60 * 1000
 
 const goalValueKeys: Partial<Record<GoalMetric, string>> = {
   adRevenue: "ad-revenue",
@@ -211,4 +214,32 @@ export async function loadGoogleProperties(providerAccountId: string, requestHea
     searchConsoleError: searchConsole.status === "rejected" ? errorMessage(searchConsole.reason) : null,
     analyticsError: analytics.status === "rejected" ? errorMessage(analytics.reason) : null,
   }
+}
+
+export async function loadGoogleKeyEvents(providerAccountId: string, requestHeaders: Headers, property: string, options: { fresh?: boolean } = {}): Promise<AnalyticsKeyEvent[]> {
+  const cacheKey = `${providerAccountId}\n${property}`
+  const now = Date.now()
+  for (const [key, entry] of keyEventsCache) if (entry.expiresAt <= now) keyEventsCache.delete(key)
+  const cached = options.fresh ? null : keyEventsCache.get(cacheKey)
+  if (cached) {
+    keyEventsCache.delete(cacheKey)
+    keyEventsCache.set(cacheKey, cached)
+    return cached.data
+  }
+  const token = await auth.api.getAccessToken({ body: { providerId: "google", accountId: providerAccountId }, headers: requestHeaders })
+  const response = await googleJson<{ keyEvents?: AnalyticsKeyEvent[] }>(
+    `https://analyticsadmin.googleapis.com/v1beta/${property}/keyEvents?pageSize=200`,
+    token.accessToken,
+  )
+  const result = (response.keyEvents ?? [])
+    .filter((item) => item.eventName)
+    .sort((left, right) => left.eventName.localeCompare(right.eventName, "ja"))
+  while (keyEventsCache.size >= GOAL_METRICS_CACHE_MAX_ENTRIES) {
+    const oldestKey = keyEventsCache.keys().next().value
+    if (oldestKey === undefined) break
+    keyEventsCache.delete(oldestKey)
+  }
+  keyEventsCache.delete(cacheKey)
+  keyEventsCache.set(cacheKey, { expiresAt: Date.now() + (result.length > 0 ? GOAL_METRICS_CACHE_MS : EMPTY_KEY_EVENTS_CACHE_MS), data: result })
+  return result
 }

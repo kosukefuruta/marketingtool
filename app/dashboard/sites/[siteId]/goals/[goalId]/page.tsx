@@ -3,10 +3,11 @@ import { headers } from "next/headers"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { GoalDriverTree } from "@/components/goal-driver-tree"
+import { GoalKeyEventForm } from "@/components/goal-key-event-form"
 import { GoalScenarios } from "@/components/goal-scenarios"
 import { db } from "@/lib/db"
-import { account, goal, site } from "@/lib/db/schema"
-import { googleValueForGoal, loadGoogleGoalMetrics } from "@/lib/google-data"
+import { account, goal, goalKeyEvent, site } from "@/lib/db/schema"
+import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent } from "@/lib/google-data"
 import { buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, isGoalMetric } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
@@ -15,10 +16,11 @@ import { isSiteCategory, siteCategories } from "@/lib/site-categories"
 export default async function GoalDetailPage({ params }: { params: Promise<{ siteId: string; goalId: string }> }) {
   const current = await requireSession()
   const { siteId, goalId } = await params
-  const [[item], [registeredSite], [googleAccount]] = await Promise.all([
+  const [[item], [registeredSite], [googleAccount], savedKeyEvents] = await Promise.all([
     db.select().from(goal).where(and(eq(goal.id, goalId), eq(goal.siteId, siteId), eq(goal.userId, current.user.id))).limit(1),
     db.select().from(site).where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1),
     db.select({ accountId: account.accountId }).from(account).where(and(eq(account.userId, current.user.id), eq(account.providerId, "google"))).limit(1),
+    db.select().from(goalKeyEvent).where(eq(goalKeyEvent.goalId, goalId)),
   ])
   if (!item || !registeredSite || !isGoalMetric(item.metric)) notFound()
 
@@ -26,13 +28,32 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
   const breakdown = getGoalBreakdown(item.metric)
   const category = registeredSite?.category && isSiteCategory(registeredSite.category) ? registeredSite.category : null
   let actuals: Awaited<ReturnType<typeof loadGoogleGoalMetrics>> | null = null
-  if (googleAccount && (registeredSite.searchConsoleProperty || registeredSite.ga4Property)) {
-    try {
-      const keywords = item.metric === "averagePosition" && item.subjectValue ? [item.subjectValue] : []
-      actuals = await loadGoogleGoalMetrics(googleAccount.accountId, await headers(), registeredSite.searchConsoleProperty, registeredSite.ga4Property, keywords)
-    } catch {
+  let availableKeyEvents: AnalyticsKeyEvent[] = []
+  let keyEventsError: string | null = null
+  const canLoadActuals = googleAccount && (registeredSite.searchConsoleProperty || registeredSite.ga4Property)
+  const canLoadKeyEvents = item.metric === "conversions" && googleAccount && registeredSite.ga4Property
+  if (canLoadActuals || canLoadKeyEvents) {
+    const requestHeaders = await headers()
+    const keywords = item.metric === "averagePosition" && item.subjectValue ? [item.subjectValue] : []
+    const [actualResult, keyEventsResult] = await Promise.allSettled([
+      canLoadActuals
+        ? loadGoogleGoalMetrics(googleAccount.accountId, requestHeaders, registeredSite.searchConsoleProperty, registeredSite.ga4Property, keywords)
+        : Promise.resolve(null),
+      canLoadKeyEvents
+        ? loadGoogleKeyEvents(googleAccount.accountId, requestHeaders, registeredSite.ga4Property!)
+        : Promise.resolve([] as AnalyticsKeyEvent[]),
+    ])
+    if (actualResult.status === "fulfilled") actuals = actualResult.value
+    else {
       actuals = { values: {}, keywordValues: {}, observations: {}, numericObservations: {}, errors: ["Googleの実測値を取得できませんでした。"], period: "" }
     }
+    if (keyEventsResult.status === "fulfilled") availableKeyEvents = keyEventsResult.value
+    else {
+      keyEventsError = "GA4のキーイベントを取得できませんでした。Google連携を確認してください。"
+    }
+  }
+  if (item.metric === "conversions" && !canLoadKeyEvents) {
+    keyEventsError = "GA4プロパティを接続するとキーイベントを選択できます。"
   }
   const scenarios = buildGoalScenarios(item.metric, item.targetValue, category, actuals?.observations, actuals?.numericObservations)
   const keywordActual = item.metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
@@ -48,6 +69,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
         <div><span>現在値</span><strong>{currentActual?.value ?? (item.baselineValue === null ? "未取得" : formatGoalValue(item.metric, item.baselineValue))}</strong></div>
       </div>
       {currentActual?.detail && <p className="muted">直近28日間: {currentActual.detail}</p>}
+      {item.metric === "conversions" && <GoalKeyEventForm siteId={siteId} goalId={item.id} available={availableKeyEvents} selected={savedKeyEvents.map((entry) => entry.eventName)} loadError={keyEventsError} />}
     </section>
     {breakdown ? <section className="card stack">
       <div><h2>目標のブレークダウン</h2><p className="goal-formula">{breakdown.formula}</p></div>
