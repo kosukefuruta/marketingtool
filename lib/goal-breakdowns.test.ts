@@ -6,7 +6,7 @@ describe("goal breakdown definitions", () => {
   it("breaks conversions into traffic and conversion rate", () => {
     const breakdown = getGoalBreakdown("conversions")
     expect(breakdown?.formula).toContain("CTAページ到達率 × CTAページCVR")
-    expect(breakdown?.drivers.map((driver) => driver.id)).toEqual(["organic-sessions", "cta-rate", "cta-cvr"])
+    expect(breakdown?.drivers.map((driver) => driver.id)).toEqual(["organic-sessions", "cta-sessions", "cta-rate", "conversion-sessions", "cta-cvr"])
   })
 
   it("uses the advertising revenue identity", () => {
@@ -26,6 +26,15 @@ describe("goal breakdown definitions", () => {
   })
 
   it("includes free contracts in the paid-contract scenario", () => {
+    expect(getGoalBreakdown("paidContracts")?.drivers.map((driver) => driver.id)).toEqual([
+      "organic-sessions",
+      "cta-sessions",
+      "cta-rate",
+      "free-conversion-sessions",
+      "free-cvr",
+      "paid-conversion-sessions",
+      "paid-rate",
+    ])
     const standard = buildGoalScenarios("paidContracts", 10).find((scenario) => scenario.id === "standard")
     expect(standard?.requirements[0]).toEqual({ label: "無料契約", value: 100, unit: "件/月" })
     expect(standard?.requirements[2]).toEqual({ label: "サイト全体流入", value: 66667, unit: "セッション/月" })
@@ -53,16 +62,30 @@ describe("goal breakdown definitions", () => {
     expect(standard?.requirements[0]).toEqual({ label: "ページビュー数", value: 166667, unit: "PV/月" })
   })
 
-  it("uses a manually entered page RPM in preference to measured and category values", () => {
+  it("weights a manually entered page RPM by its measured pageviews", () => {
     const scenarios = buildGoalScenarios("adRevenue", 100000, "entertainment", {}, {
       "page-rpm": { value: 800, weight: 0.5 },
-    }, 500)
+    }, 1.3, 443)
     expect(scenarios.map((scenario) => scenario.assumptions[0])).toEqual([
-      { label: "ページRPM（手入力）", value: "500円" },
-      { label: "ページRPM（手入力）", value: "500円" },
-      { label: "ページRPM（手入力）", value: "500円" },
+      { label: "ページRPM（手入力・実測補正 4%）", value: "192円" },
+      { label: "ページRPM（手入力・実測補正 4%）", value: "383円" },
+      { label: "ページRPM（手入力・実測補正 4%）", value: "670円" },
     ])
-    expect(scenarios.map((scenario) => scenario.requirements[0].value)).toEqual([200000, 200000, 200000])
+  })
+
+  it("does not use manual ad revenue without measured pageviews", () => {
+    const scenarios = buildGoalScenarios("adRevenue", 100000, "entertainment", {}, {}, 1.3)
+    expect(scenarios.map((scenario) => scenario.assumptions[0])).toEqual([
+      { label: "ページRPM", value: "200円" },
+      { label: "ページRPM", value: "400円" },
+      { label: "ページRPM", value: "700円" },
+    ])
+  })
+
+  it("accepts zero ad revenue as a measured RPM observation", () => {
+    const standard = buildGoalScenarios("adRevenue", 100000, "entertainment", {}, {}, 0, 10_000)
+      .find((scenario) => scenario.id === "standard")
+    expect(standard?.assumptions[0]).toEqual({ label: "ページRPM（手入力・実測補正 50%）", value: "200円" })
   })
 
   it("ignores invalid measured RPM values and weights", () => {

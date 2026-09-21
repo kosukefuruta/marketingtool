@@ -97,11 +97,11 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
         const periodLabel = period === "monthly" ? "月間目標" : period === "weekly" ? "週間目標" : period === "daily" ? "日間目標" : "目標値"
         const breakdown = metric ? getGoalBreakdown(metric) : null
         const observations = { ...actuals?.observations, ...actuals?.goalObservations[item.id] }
-        const scenarios = metric ? buildGoalScenarios(metric, item.targetValue, siteCategory, observations, actuals?.numericObservations, item.pageRpm) : []
+        const scenarios = metric ? buildGoalScenarios(metric, item.targetValue, siteCategory, observations, actuals?.numericObservations, item.pageRpmRevenue, item.pageRpmPageviews) : []
         const currentValues = {
           ...actuals?.values,
           ...actuals?.goalValues[item.id],
-          ...(item.pageRpm === null ? {} : { "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpm)}円/1,000PV`, detail: "手入力" } }),
+          ...(item.pageRpmRevenue === null || item.pageRpmPageviews === null ? {} : { "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue / item.pageRpmPageviews * 1000)}円/1,000PV`, detail: `広告収益 ${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue)}円 / ${new Intl.NumberFormat("ja-JP").format(item.pageRpmPageviews)}PV` } }),
         }
         const keywordActual = metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
         const metricActual = metric ? googleValueForGoal(metric, actuals) : null
@@ -119,7 +119,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
           {currentActual?.detail && <p className="muted">直近28日間: {currentActual.detail}</p>}
           {metric && keyEventStagesForMetric(metric).length > 0 && <GoalKeyEventForm siteId={siteId} goalId={item.id} metric={metric} available={availableKeyEvents} selected={selectedKeyEvents} loadError={keyEventsError} />}
           {metric && keyEventStagesForMetric(metric).length > 0 && <GoalCtaPageForm siteId={siteId} goalId={item.id} siteOrigin={registeredSite.normalizedOrigin} paths={ctaPaths} />}
-          {metric === "adRevenue" && <GoalPageRpmForm siteId={siteId} goalId={item.id} pageRpm={item.pageRpm} />}
+          {metric === "adRevenue" && <GoalPageRpmForm siteId={siteId} goalId={item.id} legacyPageRpm={item.pageRpm} pageRpmRevenue={item.pageRpmRevenue} pageRpmPageviews={item.pageRpmPageviews} />}
           {breakdown ? <div className="stack">
             <div><h4>目標のブレークダウン</h4><p className="goal-formula">{breakdown.formula}</p></div>
             <GoalDriverTree drivers={breakdown.drivers} currentValues={currentValues} />

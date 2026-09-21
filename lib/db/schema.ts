@@ -77,6 +77,8 @@ export const goal = pgTable("goal", {
   baselineValue: doublePrecision("baseline_value"),
   targetValue: doublePrecision("target_value").notNull(),
   pageRpm: doublePrecision("page_rpm"),
+  pageRpmRevenue: doublePrecision("page_rpm_revenue"),
+  pageRpmPageviews: integer("page_rpm_pageviews"),
   period: text("period").notNull().default("monthly"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),

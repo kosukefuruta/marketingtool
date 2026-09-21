@@ -35,9 +35,13 @@ export function GoalForm({ site, keyEvents = [], keyEventsError = null }: { site
         </select>
         <small className="muted">ジャンル別のページRPMから必要PVを計算します。</small>
       </label>}
-      {metric === "adRevenue" && <label className="field">ページRPM（円・任意）
-        <input name="pageRpm" type="number" min="0.01" step="any" inputMode="decimal" placeholder="例: 500" />
-        <small className="muted">1,000PVあたりの広告収益です。入力した値をジャンル別の初期値より優先します。</small>
+      {metric === "adRevenue" && <label className="field">計測期間の広告収益（円・任意）
+        <input name="pageRpmRevenue" type="number" min="0" step="any" inputMode="decimal" placeholder="例: 1.3" />
+        <small className="muted">同じ期間の計測PV数と合わせてRPMを自動計算します。収益0円も入力できます。</small>
+      </label>}
+      {metric === "adRevenue" && <label className="field">RPMの計測PV数（任意）
+        <input name="pageRpmPageviews" type="number" min="1" step="1" inputMode="numeric" placeholder="例: 443" />
+        <small className="muted">データ量に応じてジャンル別の初期値から実測RPMへ近づけます。</small>
       </label>}
       <KeyEventFields stages={keyEventStagesForMetric(metric)} available={keyEvents} loadError={keyEventsError} />
       <label className="field">目標値（{definition.unit}）

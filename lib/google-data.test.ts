@@ -97,6 +97,8 @@ describe("Google goal metrics", () => {
       "cta-cvr": { successes: 4, trials: 100 },
     })
     expect(result.goalValues["goal-1"]?.["goal-total"]?.value).toBe("4件")
+    expect(result.goalValues["goal-1"]?.["cta-sessions"]?.value).toBe("100セッション")
+    expect(result.goalValues["goal-1"]?.["conversion-sessions"]?.value).toBe("4セッション")
   })
 
   it("uses a 180-day event-count ratio for the paid-contract proxy", async () => {
@@ -136,6 +138,9 @@ describe("Google goal metrics", () => {
       "paid-rate": { successes: 4, trials: 20 },
     })
     expect(result.goalValues["paid-goal"]?.["goal-total"]?.value).toBe("2件")
+    expect(result.goalValues["paid-goal"]?.["cta-sessions"]?.value).toBe("50セッション")
+    expect(result.goalValues["paid-goal"]?.["free-conversion-sessions"]?.value).toBe("3セッション")
+    expect(result.goalValues["paid-goal"]?.["paid-conversion-sessions"]?.value).toBe("2セッション")
   })
 
   it("shares identical goal reports and limits goal-specific measurement", async () => {

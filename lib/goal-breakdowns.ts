@@ -1,6 +1,7 @@
 import type { GoalMetric } from "./goals"
 import type { NumericObservation } from "./google-data"
 import { priorFromThreePoints, updateRate } from "./bayesian-rate"
+import { parsePageRpmObservation } from "./page-rpm"
 import { siteCategories, type SiteCategory } from "./site-categories"
 
 export type GoalDriver = {
@@ -30,12 +31,21 @@ const organicSessions: GoalDriver = {
   ],
 }
 
+const ctaSessions: GoalDriver = {
+  id: "cta-sessions",
+  label: "CTAページ到達数（セッション）",
+  unit: "セッション/月",
+  source: "GA4",
+  description: "自然検索経由で、設定したCTAページを閲覧したセッション数",
+}
+
 const definitions: Partial<Record<GoalMetric, GoalBreakdown>> = {
   conversions: {
     formula: "CV数 = サイト全体流入 × CTAページ到達率 × CTAページCVR",
     phase: "初期仮定による計画",
     drivers: [
       organicSessions,
+      ctaSessions,
       {
         id: "cta-rate",
         label: "CTAページ到達率",
@@ -43,6 +53,7 @@ const definitions: Partial<Record<GoalMetric, GoalBreakdown>> = {
         source: "GA4",
         description: "自然検索セッションのうちCTAページを閲覧した割合",
       },
+      { id: "conversion-sessions", label: "CV数（セッション）", unit: "セッション/月", source: "GA4キーイベント", description: "自然検索経由で、選択したCVキーイベントが発生したセッション数" },
       { id: "cta-cvr", label: "CTAページCVR（推定）", unit: "%", source: "GA4イベント", description: "CTA到達セッション数に対するCV発生セッション数の推定比。両者が同一セッションとは限らない" },
     ],
   },
@@ -51,8 +62,11 @@ const definitions: Partial<Record<GoalMetric, GoalBreakdown>> = {
     phase: "初期仮定による計画",
     drivers: [
       organicSessions,
+      ctaSessions,
       { id: "cta-rate", label: "CTAページ到達率", unit: "%", source: "GA4イベント", description: "自然検索セッションから無料契約導線へ進んだ割合" },
+      { id: "free-conversion-sessions", label: "無料契約CV数（セッション）", unit: "セッション/月", source: "GA4キーイベント", description: "自然検索経由で、選択した無料登録キーイベントが発生したセッション数" },
       { id: "free-cvr", label: "無料契約CVR（推定）", unit: "%", source: "GA4イベント", description: "CTA到達セッション数に対する無料登録セッション数の推定比。両者が同一セッションとは限らない" },
+      { id: "paid-conversion-sessions", label: "有料契約CV数（セッション）", unit: "セッション/月", source: "GA4キーイベント", description: "自然検索経由で、選択した有料契約キーイベントが発生したセッション数" },
       { id: "paid-rate", label: "無料→有料転換率（推定）", unit: "%", source: "GA4キーイベント", description: "直近180日の無料登録イベント発生セッション数に対する有料契約イベント発生セッション数の比率。コホート転換率の代替値" },
     ],
   },
@@ -105,7 +119,7 @@ function updatedRates(initial: [number, number, number], observation?: RateObser
   return estimate ? [estimate.low, estimate.median, estimate.high] : initial
 }
 
-export function buildGoalScenarios(metric: GoalMetric, target: number, category?: SiteCategory | null, observations: Record<string, RateObservation> = {}, numericObservations: Record<string, NumericObservation> = {}, manualPageRpm?: number | null): GoalScenario[] {
+export function buildGoalScenarios(metric: GoalMetric, target: number, category?: SiteCategory | null, observations: Record<string, RateObservation> = {}, numericObservations: Record<string, NumericObservation> = {}, manualPageRpmRevenue?: number | null, manualPageRpmPageviews?: number | null): GoalScenario[] {
   if (metric === "conversions") {
     const ctaRates = updatedRates([0.02, 0.03, 0.05], observations["cta-rate"])
     const conversionRates = updatedRates([0.005, 0.01, 0.02], observations["cta-cvr"])
@@ -143,24 +157,22 @@ export function buildGoalScenarios(metric: GoalMetric, target: number, category?
     })
   }
   if (metric === "adRevenue" && category) {
-    const validManualPageRpm = manualPageRpm !== null && manualPageRpm !== undefined && Number.isFinite(manualPageRpm) && manualPageRpm > 0
-      ? manualPageRpm
-      : null
+    const manualObservation = parsePageRpmObservation(String(manualPageRpmRevenue ?? ""), String(manualPageRpmPageviews ?? "")).value
+    const validManualObservation = manualObservation ? { value: manualObservation.rpm, weight: manualObservation.weight } : null
     const candidateRpm = numericObservations["page-rpm"]
     const measuredRpm = candidateRpm
       && Number.isFinite(candidateRpm.value) && candidateRpm.value >= 0
       && Number.isFinite(candidateRpm.weight) && candidateRpm.weight >= 0 && candidateRpm.weight <= 1
       ? candidateRpm : null
+    const rpmObservation = validManualObservation ?? measuredRpm
     return scenarioLabels.map(({ id, label }, index) => {
       const initialRpm = siteCategories[category].rpm[index]
-      const rpm = validManualPageRpm !== null
-        ? validManualPageRpm
-        : measuredRpm
-        ? (1 - measuredRpm.weight) * initialRpm + measuredRpm.weight * measuredRpm.value
+      const rpm = rpmObservation
+        ? (1 - rpmObservation.weight) * initialRpm + rpmObservation.weight * rpmObservation.value
         : initialRpm
       return {
         id, label,
-        assumptions: [{ label: validManualPageRpm !== null ? "ページRPM（手入力）" : measuredRpm ? `ページRPM（実測補正 ${Math.round(measuredRpm.weight * 100)}%）` : "ページRPM", value: `${Math.round(rpm).toLocaleString("ja-JP")}円` }],
+        assumptions: [{ label: rpmObservation ? `ページRPM（${validManualObservation ? "手入力・" : ""}実測補正 ${Math.round(rpmObservation.weight * 100)}%）` : "ページRPM", value: `${Math.round(rpm).toLocaleString("ja-JP")}円` }],
         requirements: [{ label: "ページビュー数", value: Math.ceil(target / rpm * 1000), unit: "PV/月" }],
       }
     })
