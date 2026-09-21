@@ -49,7 +49,7 @@ button { cursor: pointer; }
 .goal-driver-tree ul { margin: 12px 0 0 24px; padding-left: 20px; border-left: 2px solid var(--line); }
 .goal-driver-card { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(280px, 2fr); gap: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; }
 .goal-driver-card p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
-.goal-driver-card dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 0; }
+.goal-driver-card dl { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 0; }
 .goal-driver-card dd { margin: 0; }
 .status-label { padding: 4px 10px; border-radius: 999px; background: #f2f4f7; color: var(--muted); font-size: 13px; }
 .scenario-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
