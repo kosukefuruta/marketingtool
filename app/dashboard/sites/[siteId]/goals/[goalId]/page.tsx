@@ -69,11 +69,11 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
     keyEventsError = "GA4プロパティを接続するとキーイベントを選択できます。"
   }
   const observations = { ...actuals?.observations, ...actuals?.goalObservations[item.id] }
-  const scenarios = buildGoalScenarios(item.metric, item.targetValue, category, observations, actuals?.numericObservations, item.pageRpm)
+  const scenarios = buildGoalScenarios(item.metric, item.targetValue, category, observations, actuals?.numericObservations, item.pageRpmRevenue, item.pageRpmPageviews)
   const currentValues = {
     ...actuals?.values,
     ...actuals?.goalValues[item.id],
-    ...(item.pageRpm === null ? {} : { "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpm)}円/1,000PV`, detail: "手入力" } }),
+    ...(item.pageRpmRevenue === null || item.pageRpmPageviews === null ? {} : { "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue / item.pageRpmPageviews * 1000)}円/1,000PV`, detail: `広告収益 ${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue)}円 / ${new Intl.NumberFormat("ja-JP").format(item.pageRpmPageviews)}PV` } }),
   }
   const keywordActual = item.metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
   const currentActual = keywordActual ?? actuals?.goalValues[item.id]?.["goal-total"] ?? googleValueForGoal(item.metric, actuals)
@@ -91,7 +91,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
       {currentActual?.detail && <p className="muted">直近28日間: {currentActual.detail}</p>}
       {keyEventStagesForMetric(item.metric).length > 0 && <GoalKeyEventForm siteId={siteId} goalId={item.id} metric={item.metric} available={availableKeyEvents} selected={groupGoalKeyEvents(savedKeyEvents)} loadError={keyEventsError} />}
       {keyEventStagesForMetric(item.metric).length > 0 && <GoalCtaPageForm siteId={siteId} goalId={item.id} siteOrigin={registeredSite.normalizedOrigin} paths={savedCtaPages.map((entry) => entry.path)} />}
-      {item.metric === "adRevenue" && <GoalPageRpmForm siteId={siteId} goalId={item.id} pageRpm={item.pageRpm} />}
+      {item.metric === "adRevenue" && <GoalPageRpmForm siteId={siteId} goalId={item.id} legacyPageRpm={item.pageRpm} pageRpmRevenue={item.pageRpmRevenue} pageRpmPageviews={item.pageRpmPageviews} />}
     </section>
     {breakdown ? <section className="card stack">
       <div><h2>目標のブレークダウン</h2><p className="goal-formula">{breakdown.formula}</p></div>

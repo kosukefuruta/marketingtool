@@ -9,6 +9,7 @@ import { account, auditJob, goal, goalCtaPage, goalKeyEvent, site, subscription,
 import { parseCtaPagePaths } from "@/lib/goal-cta-pages"
 import { loadGoogleProperties } from "@/lib/google-data"
 import { goalKeyEventStages, isValidGoogleEventName, keyEventFieldName, keyEventStagesForMetric, manualKeyEventFieldName, type GoalKeyEventStage } from "@/lib/goal-key-events"
+import { parsePageRpmObservation } from "@/lib/page-rpm"
 import { searchConsoleSiteMatches } from "@/lib/google-property-match"
 import { goalMetrics, goalNameFor, goalSubjectForMetric, isGoalMetric, validateGoalValues } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
@@ -159,7 +160,8 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
   const metric = String(formData.get("metric") ?? "")
   const targetRaw = String(formData.get("targetValue") ?? "").trim()
   const category = String(formData.get("category") ?? "")
-  const pageRpmRaw = String(formData.get("pageRpm") ?? "").trim()
+  const pageRpmRevenueRaw = String(formData.get("pageRpmRevenue") ?? "").trim()
+  const pageRpmPageviewsRaw = String(formData.get("pageRpmPageviews") ?? "").trim()
 
   if (!siteId || !isGoalMetric(metric) || !targetRaw) {
     return { error: "指標と目標値を入力してください。" }
@@ -170,10 +172,10 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
   if (metric === "adRevenue" && !isSiteCategory(category)) return { error: "サイトジャンルを選択してください。" }
   if (subjectValue.length > 200) return { error: "キーワードは200文字以内で入力してください。" }
   const targetValue = Number(targetRaw)
-  const pageRpm = pageRpmRaw ? Number(pageRpmRaw) : null
+  const pageRpmObservation = parsePageRpmObservation(pageRpmRevenueRaw, pageRpmPageviewsRaw)
   const valueError = validateGoalValues(metric, null, targetValue)
   if (valueError) return { error: valueError }
-  if (metric === "adRevenue" && pageRpm !== null && (!Number.isFinite(pageRpm) || pageRpm <= 0)) return { error: "ページRPMは0より大きい数値で入力してください。" }
+  if (metric === "adRevenue" && pageRpmObservation.error) return { error: pageRpmObservation.error }
   const keyEventError = validateKeyEvents(keyEvents)
   if (keyEventError) return { error: keyEventError }
 
@@ -199,7 +201,9 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
       metric,
       baselineValue: null,
       targetValue,
-      pageRpm: metric === "adRevenue" ? pageRpm : null,
+      pageRpm: null,
+      pageRpmRevenue: metric === "adRevenue" ? pageRpmObservation.value?.revenue ?? null : null,
+      pageRpmPageviews: metric === "adRevenue" ? pageRpmObservation.value?.pageviews ?? null : null,
       period: goalMetrics[metric].defaultPeriod,
       createdAt: now,
       updatedAt: now,
@@ -215,12 +219,18 @@ export async function saveGoalPageRpm(_state: GoalPageRpmFormState, formData: Fo
   const current = await requireSession()
   const siteId = String(formData.get("siteId") ?? "").trim()
   const goalId = String(formData.get("goalId") ?? "").trim()
-  const pageRpmRaw = String(formData.get("pageRpm") ?? "").trim()
-  const pageRpm = pageRpmRaw ? Number(pageRpmRaw) : null
+  const pageRpmRevenueRaw = String(formData.get("pageRpmRevenue") ?? "").trim()
+  const pageRpmPageviewsRaw = String(formData.get("pageRpmPageviews") ?? "").trim()
+  const pageRpmObservation = parsePageRpmObservation(pageRpmRevenueRaw, pageRpmPageviewsRaw)
   if (!siteId || !goalId) return { error: "目標が見つかりません。" }
-  if (pageRpm !== null && (!Number.isFinite(pageRpm) || pageRpm <= 0)) return { error: "ページRPMは0より大きい数値で入力してください。" }
+  if (pageRpmObservation.error) return { error: pageRpmObservation.error }
 
-  const [updated] = await db.update(goal).set({ pageRpm, updatedAt: new Date() }).where(and(
+  const [updated] = await db.update(goal).set({
+    pageRpm: null,
+    pageRpmRevenue: pageRpmObservation.value?.revenue ?? null,
+    pageRpmPageviews: pageRpmObservation.value?.pageviews ?? null,
+    updatedAt: new Date(),
+  }).where(and(
     eq(goal.id, goalId),
     eq(goal.siteId, siteId),
     eq(goal.userId, current.user.id),
@@ -229,7 +239,7 @@ export async function saveGoalPageRpm(_state: GoalPageRpmFormState, formData: Fo
   if (!updated) return { error: "広告収益の目標が見つかりません。" }
   revalidatePath(`/dashboard/sites/${siteId}/goals`)
   revalidatePath(`/dashboard/sites/${siteId}/goals/${goalId}`)
-  return { success: pageRpm === null ? "手入力のページRPMを解除しました。" : "ページRPMを保存しました。" }
+  return { success: pageRpmObservation.value === null ? "手入力のRPM観測値を解除しました。" : "広告収益と計測PV数を保存しました。" }
 }
 
 export async function saveGoalCtaPages(_state: GoalCtaPageFormState, formData: FormData): Promise<GoalCtaPageFormState> {

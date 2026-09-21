@@ -3,6 +3,7 @@ import { runWithConcurrency } from "./async-pool"
 import { updateRate } from "./bayesian-rate"
 import type { RateObservation } from "./goal-breakdowns"
 import type { GoalMetric } from "./goals"
+import { RPM_PRIOR_PAGEVIEWS } from "./page-rpm"
 
 export const GOOGLE_DATA_SCOPES = [
   "https://www.googleapis.com/auth/webmasters.readonly",
@@ -61,7 +62,6 @@ const GOAL_METRICS_CACHE_MAX_ENTRIES = 200
 const KEYWORD_REQUEST_CONCURRENCY = 4
 const GOAL_REQUEST_CONCURRENCY = 3
 const GOAL_ANALYTICS_CONFIG_LIMIT = 10
-const RPM_PRIOR_PAGEVIEWS = 10_000
 const keyEventsCache = new Map<string, { expiresAt: number; data: AnalyticsKeyEvent[] }>()
 const EMPTY_KEY_EVENTS_CACHE_MS = 60 * 1000
 
@@ -282,12 +282,21 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
         observationsForGoal[id] = { successes, trials }
         valuesForGoal[id] = { value: `${number.format(successes / trials * 100)}%`, detail: `${successLabel} ${number.format(successes)} / ${trialLabel} ${number.format(trials)}` }
       }
+      if (count.cta !== undefined) valuesForGoal["cta-sessions"] = { value: `${number.format(count.cta)}セッション`, detail: "直近28日の自然検索経由" }
       addRate("cta-rate", count.cta, organicSessions, "CTA到達セッション", "自然検索セッション")
       if (config.metric === "conversions") {
-        if (count.conversionSessions !== undefined) valuesForGoal["goal-total"] = { value: `${number.format(count.conversionSessions)}件`, detail: "直近28日に自然検索経由で選択キーイベントが発生したセッション数" }
+        if (count.conversionSessions !== undefined) {
+          const conversionValue = { value: `${number.format(count.conversionSessions)}セッション`, detail: "直近28日の自然検索経由" }
+          valuesForGoal["conversion-sessions"] = conversionValue
+          valuesForGoal["goal-total"] = { value: `${number.format(count.conversionSessions)}件`, detail: "直近28日に自然検索経由で選択キーイベントが発生したセッション数" }
+        }
         addRate("cta-cvr", count.conversionSessions, count.cta, "CV発生セッション", "CTA到達セッション（推定比）")
       } else {
-        if (count.paidSessions !== undefined) valuesForGoal["goal-total"] = { value: `${number.format(count.paidSessions)}件`, detail: "直近28日に自然検索経由で有料契約キーイベントが発生したセッション数" }
+        if (count.freeSessions !== undefined) valuesForGoal["free-conversion-sessions"] = { value: `${number.format(count.freeSessions)}セッション`, detail: "直近28日の自然検索経由" }
+        if (count.paidSessions !== undefined) {
+          valuesForGoal["paid-conversion-sessions"] = { value: `${number.format(count.paidSessions)}セッション`, detail: "直近28日の自然検索経由" }
+          valuesForGoal["goal-total"] = { value: `${number.format(count.paidSessions)}件`, detail: "直近28日に自然検索経由で有料契約キーイベントが発生したセッション数" }
+        }
         addRate("free-cvr", count.freeSessions, count.cta, "無料登録セッション", "CTA到達セッション（推定比）")
         addRate("paid-rate", count.paidLongSessions, count.freeLongSessions, "有料契約発生セッション（直近180日）", "無料登録発生セッション（直近180日）")
       }
