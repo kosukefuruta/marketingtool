@@ -14,11 +14,17 @@ export async function POST(request: Request) {
   if (!current) return Response.json({ error: "ログインしてください。" }, { status: 401 })
 
   try {
+    const form = await request.formData()
+    const requestedUrl = String(form.get("url") ?? "").trim()
+    const max = Number(form.get("max") ?? 100)
     const monthStart = new Date()
     monthStart.setUTCDate(1)
     monthStart.setUTCHours(0, 0, 0, 0)
     const [[registeredSite], [plan], [usage]] = await Promise.all([
-      db.select({ id: site.id, origin: site.normalizedOrigin }).from(site).where(eq(site.userId, current.user.id)).limit(1),
+      db.select({ id: site.id, origin: site.normalizedOrigin }).from(site).where(and(
+        eq(site.userId, current.user.id),
+        eq(site.normalizedOrigin, requestedUrl),
+      )).limit(1),
       db.select({ status: subscription.status, grace: subscription.gracePeriodEndsAt })
         .from(subscription).where(eq(subscription.userId, current.user.id)).limit(1),
       db.select({ value: count() }).from(auditJob)
@@ -26,9 +32,6 @@ export async function POST(request: Request) {
     ])
     if (!registeredSite) return Response.json({ error: "先にサイトを登録してください。" }, { status: 400 })
 
-    const form = await request.formData()
-    const requestedUrl = String(form.get("url") ?? "").trim()
-    const max = Number(form.get("max") ?? 100)
     if (!hasPaidAccess(plan?.status, plan?.grace)) {
       return Response.json({ error: "サイト分析を実行するには有効な契約が必要です。" }, { status: 403 })
     }

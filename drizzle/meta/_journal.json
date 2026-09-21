@@ -43,6 +43,13 @@
       "when": 1789973940192,
       "tag": "0005_small_morg",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789981864910,
+      "tag": "0006_charming_prodigy",
+      "breakpoints": true
     }
   ]
 }

@@ -3,7 +3,8 @@
 import { useActionState } from "react"
 import { saveSite, type SiteFormState } from "@/app/actions"
 
-export function SiteForm({ defaultName, defaultUrl, submitLabel, nameOptional }: {
+export function SiteForm({ siteId, defaultName, defaultUrl, submitLabel, nameOptional }: {
+  siteId?: string
   defaultName?: string
   defaultUrl?: string
   submitLabel: string
@@ -12,6 +13,7 @@ export function SiteForm({ defaultName, defaultUrl, submitLabel, nameOptional }:
   const [state, action, pending] = useActionState<SiteFormState, FormData>(saveSite, {})
 
   return <form className="stack" action={action}>
+    {siteId && <input name="siteId" type="hidden" value={siteId} />}
     <label className="field">{nameOptional ? "サイト名（任意）" : "サイト名"}
       <input name="name" defaultValue={defaultName} placeholder={nameOptional ? "株式会社Owtell" : undefined} />
     </label>

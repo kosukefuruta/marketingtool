@@ -1,9 +1,10 @@
 "use server"
 
-import { and, eq, isNull } from "drizzle-orm"
+import { and, count, eq, isNull, sql } from "drizzle-orm"
 import { redirect } from "next/navigation"
 import { db } from "@/lib/db"
-import { site, subscription, user } from "@/lib/db/schema"
+import { goal, site, subscription, user } from "@/lib/db/schema"
+import { isGoalMetric, isGoalPeriod, isGoalSubject, validateGoalValues } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
 import { defaultSiteName, normalizePublicSiteUrl } from "@/lib/sites"
 import { getStripe } from "@/lib/stripe"
@@ -11,8 +12,11 @@ import { blocksNewCheckout } from "@/lib/subscription-access"
 
 export type SiteFormState = { error?: string }
 
+const SITE_LIMIT = 3
+
 export async function saveSite(_state: SiteFormState, formData: FormData): Promise<SiteFormState> {
   const current = await requireSession()
+  const siteId = String(formData.get("siteId") ?? "").trim()
   const rawUrl = String(formData.get("url") ?? "")
   const rawName = String(formData.get("name") ?? "").trim()
   let normalized: Awaited<ReturnType<typeof normalizePublicSiteUrl>>
@@ -22,24 +26,107 @@ export async function saveSite(_state: SiteFormState, formData: FormData): Promi
     return { error: error instanceof Error ? error.message : "正しいサイトURLを入力してください。" }
   }
   const now = new Date()
-  await db.insert(site).values({
+  try {
+    if (siteId) {
+      const updated = await db.update(site).set({
+        name: rawName || defaultSiteName(normalized.origin),
+        inputUrl: normalized.inputUrl,
+        normalizedOrigin: normalized.origin,
+        updatedAt: now,
+      }).where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).returning({ id: site.id })
+      if (!updated.length) return { error: "更新するサイトが見つかりません。" }
+    } else {
+      const inserted = await db.transaction(async (tx) => {
+        // Serialize additions for one user so concurrent submissions cannot exceed the limit.
+        await tx.execute(sql`select ${user.id} from ${user} where ${user.id} = ${current.user.id} for update`)
+        const [usage] = await tx.select({ value: count() }).from(site).where(eq(site.userId, current.user.id))
+        if ((usage?.value ?? 0) >= SITE_LIMIT) return false
+        await tx.insert(site).values({
+          id: crypto.randomUUID(),
+          userId: current.user.id,
+          name: rawName || defaultSiteName(normalized.origin),
+          inputUrl: normalized.inputUrl,
+          normalizedOrigin: normalized.origin,
+          createdAt: now,
+          updatedAt: now,
+        })
+        return true
+      })
+      if (!inserted) return { error: `登録できるサイトは${SITE_LIMIT}件までです。` }
+    }
+  } catch (error) {
+    if (typeof error === "object" && error && "code" in error && error.code === "23505") {
+      return { error: "このサイトはすでに登録されています。" }
+    }
+    throw error
+  }
+  redirect(siteId ? "/settings/site" : "/dashboard")
+}
+
+export type GoalFormState = { error?: string }
+
+export async function createGoal(_state: GoalFormState, formData: FormData): Promise<GoalFormState> {
+  const current = await requireSession()
+  const siteId = String(formData.get("siteId") ?? "").trim()
+  const name = String(formData.get("name") ?? "").trim()
+  const subjectType = String(formData.get("subjectType") ?? "")
+  const subjectValue = String(formData.get("subjectValue") ?? "").trim()
+  const metric = String(formData.get("metric") ?? "")
+  const period = String(formData.get("period") ?? "")
+  const baselineRaw = String(formData.get("baselineValue") ?? "").trim()
+  const targetRaw = String(formData.get("targetValue") ?? "").trim()
+
+  if (!siteId || !name || !isGoalSubject(subjectType) || !isGoalMetric(metric) || !isGoalPeriod(period) || !targetRaw) {
+    return { error: "サイト、対象、目標名、指標、目標値を入力してください。" }
+  }
+  if (subjectType !== "site" && !subjectValue) return { error: "キーワードまたはページURLを入力してください。" }
+  if (name.length > 120 || subjectValue.length > 2000) {
+    return { error: "入力内容が長すぎます。" }
+  }
+  const baselineValue = baselineRaw ? Number(baselineRaw) : null
+  const targetValue = Number(targetRaw)
+  const valueError = validateGoalValues(metric, baselineValue, targetValue)
+  if (valueError) return { error: valueError }
+
+  const [ownedSite] = await db.select({ id: site.id, origin: site.normalizedOrigin }).from(site)
+    .where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1)
+  if (!ownedSite) return { error: "登録サイトが見つかりません。" }
+
+  let normalizedSubjectValue: string | null = subjectType === "site" ? null : subjectValue
+  if (subjectType === "page") {
+    let parsed: URL
+    try {
+      parsed = new URL(subjectValue)
+    } catch {
+      return { error: "対象ページには正しいURLを入力してください。" }
+    }
+    if (parsed.origin !== ownedSite.origin) return { error: "対象ページは選択したサイト内のURLを入力してください。" }
+    normalizedSubjectValue = parsed.href
+  }
+
+  const now = new Date()
+  await db.insert(goal).values({
     id: crypto.randomUUID(),
     userId: current.user.id,
-    name: rawName || defaultSiteName(normalized.origin),
-    inputUrl: normalized.inputUrl,
-    normalizedOrigin: normalized.origin,
+    siteId,
+    name,
+    subjectType,
+    subjectValue: normalizedSubjectValue,
+    metric,
+    baselineValue,
+    targetValue,
+    period,
     createdAt: now,
     updatedAt: now,
-  }).onConflictDoUpdate({
-    target: site.userId,
-    set: {
-      name: rawName || defaultSiteName(normalized.origin),
-      inputUrl: normalized.inputUrl,
-      normalizedOrigin: normalized.origin,
-      updatedAt: now,
-    },
   })
-  redirect("/dashboard")
+  redirect("/dashboard/goals")
+}
+
+export async function deleteGoal(formData: FormData): Promise<void> {
+  const current = await requireSession()
+  const goalId = String(formData.get("goalId") ?? "")
+  if (goalId) await db.delete(goal).where(and(eq(goal.id, goalId), eq(goal.userId, current.user.id)))
+  redirect("/dashboard/goals")
 }
 
 async function findOrCreateStripeCustomer(userId: string): Promise<string> {

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm"
+import { and, asc, desc, eq, inArray } from "drizzle-orm"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 import { AuditForm } from "@/components/audit-form"
@@ -10,18 +10,19 @@ import { hasPaidAccess } from "@/lib/subscriptions"
 
 const PAID_MAX_PAGES = 300
 
-export default async function DashboardAuditPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
+export default async function DashboardAuditPage({ searchParams }: { searchParams: Promise<{ page?: string; siteId?: string }> }) {
   const current = await requireSession()
   const params = await searchParams
   const requestedPage = Number(params.page ?? "1")
   const page = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1
   const pageSize = 20
-  const [[registeredSite], [plan]] = await Promise.all([
-    db.select().from(site).where(eq(site.userId, current.user.id)).limit(1),
+  const [registeredSites, [plan]] = await Promise.all([
+    db.select().from(site).where(eq(site.userId, current.user.id)).orderBy(asc(site.createdAt)),
     db.select({ status: subscription.status, grace: subscription.gracePeriodEndsAt, currentPeriodEnd: subscription.currentPeriodEnd })
       .from(subscription).where(eq(subscription.userId, current.user.id)).limit(1),
   ])
-  if (!registeredSite) redirect("/onboarding/site")
+  if (!registeredSites.length) redirect("/onboarding/site")
+  const registeredSite = registeredSites.find((item) => item.id === params.siteId) ?? registeredSites[0]
 
   const paid = hasPaidAccess(plan?.status, plan?.grace)
   const canViewHistory = auditHistoryVisible(plan?.status, plan?.grace, plan?.currentPeriodEnd)
@@ -44,6 +45,9 @@ export default async function DashboardAuditPage({ searchParams }: { searchParam
       <h1>サイト分析</h1>
       <p className="muted">登録サイトを巡回し、ページごとの技術SEO項目を分析します。</p>
     </div>
+    {registeredSites.length > 1 && <nav className="site-tabs" aria-label="分析するサイト">
+      {registeredSites.map((item) => <Link className={item.id === registeredSite.id ? "active" : ""} key={item.id} href={`/dashboard/audit?siteId=${item.id}`}>{item.name}</Link>)}
+    </nav>}
     {paid ? <AuditForm
       endpoint="/api/dashboard/audit"
       siteUrl={registeredSite.normalizedOrigin}
@@ -63,8 +67,8 @@ export default async function DashboardAuditPage({ searchParams }: { searchParam
         </tr>)}
       </tbody></table> : <p className="muted">診断履歴はまだありません。</p>}
       <div className="nav-links">
-        {page > 1 && <Link href={`/dashboard/audit?page=${page - 1}`}>新しい履歴へ</Link>}
-        {hasNextPage && <Link href={`/dashboard/audit?page=${page + 1}`}>古い履歴へ</Link>}
+        {page > 1 && <Link href={`/dashboard/audit?siteId=${registeredSite.id}&page=${page - 1}`}>新しい履歴へ</Link>}
+        {hasNextPage && <Link href={`/dashboard/audit?siteId=${registeredSite.id}&page=${page + 1}`}>古い履歴へ</Link>}
       </div>
     </section>}
     <Link href="/dashboard">ダッシュボードへ戻る</Link>
