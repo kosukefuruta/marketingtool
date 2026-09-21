@@ -9,6 +9,7 @@ import { GoalScenarios } from "@/components/goal-scenarios"
 import { db } from "@/lib/db"
 import { account, goal, goalKeyEvent, site } from "@/lib/db/schema"
 import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent } from "@/lib/google-data"
+import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
 import { buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, goalSubjects, isGoalMetric, isGoalPeriod, isGoalSubject } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
@@ -80,7 +81,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
         const keywordActual = metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
         const metricActual = metric ? googleValueForGoal(metric, actuals) : null
         const currentActual = keywordActual ?? metricActual
-        const selectedKeyEvents = savedKeyEvents.filter((entry) => entry.goalId === item.id).map((entry) => entry.eventName)
+        const selectedKeyEvents = groupGoalKeyEvents(savedKeyEvents.filter((entry) => entry.goalId === item.id))
         return <article className="goal-card stack" id={`goal-${item.id}`} key={item.id}>
           <h3>{item.name}</h3>
           <dl className="detail-grid">
@@ -90,7 +91,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
             <div><dt>{periodLabel}</dt><dd><strong>{metric && goalMetrics[metric].direction === "decrease" ? "≤ " : "≥ "}{metric ? formatGoalValue(metric, item.targetValue) : item.targetValue}</strong></dd></div>
           </dl>
           {currentActual?.detail && <p className="muted">直近28日間: {currentActual.detail}</p>}
-          {metric === "conversions" && <GoalKeyEventForm siteId={siteId} goalId={item.id} available={availableKeyEvents} selected={selectedKeyEvents} loadError={keyEventsError} />}
+          {metric && keyEventStagesForMetric(metric).length > 0 && <GoalKeyEventForm siteId={siteId} goalId={item.id} metric={metric} available={availableKeyEvents} selected={selectedKeyEvents} loadError={keyEventsError} />}
           {breakdown ? <div className="stack">
             <div><h4>目標のブレークダウン</h4><p className="goal-formula">{breakdown.formula}</p></div>
             <GoalDriverTree drivers={breakdown.drivers} currentValues={actuals?.values} />

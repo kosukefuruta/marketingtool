@@ -71,6 +71,13 @@
       "when": 1789999210611,
       "tag": "0009_tan_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790001613204,
+      "tag": "0010_clumsy_namor",
+      "breakpoints": true
     }
   ]
 }

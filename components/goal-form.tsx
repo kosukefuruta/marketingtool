@@ -2,6 +2,8 @@
 
 import { useActionState, useState } from "react"
 import { createGoal, type GoalFormState } from "@/app/actions"
+import { KeyEventFields } from "@/components/key-event-fields"
+import { keyEventStagesForMetric } from "@/lib/goal-key-events"
 import { goalMetrics, type GoalMetric } from "@/lib/goals"
 import { siteCategories, type SiteCategory } from "@/lib/site-categories"
 import type { AnalyticsKeyEvent } from "@/lib/google-data"
@@ -33,12 +35,7 @@ export function GoalForm({ site, keyEvents = [], keyEventsError = null }: { site
         </select>
         <small className="muted">ジャンル別のページRPMから必要PVを計算します。</small>
       </label>}
-      {metric === "conversions" && <fieldset className="field checkbox-group">
-        <legend>CVとなるGA4キーイベント（複数選択可・最大20件）</legend>
-        {keyEvents.length > 0 ? keyEvents.map((item) => <label key={item.name || item.eventName}>
-          <input type="checkbox" name="keyEvent" value={item.eventName} /> {item.eventName}
-        </label>) : <small className="muted">{keyEventsError ?? "選択できるキーイベントがありません。GA4でキーイベントを設定すると、ここから選択できます。"}</small>}
-      </fieldset>}
+      <KeyEventFields stages={keyEventStagesForMetric(metric)} available={keyEvents} loadError={keyEventsError} />
       <label className="field">目標値（{definition.unit}）
         <input name="targetValue" type="number" min={needsKeyword ? 1 : 0} max={isRate ? 100 : undefined} step="any" inputMode="decimal" placeholder={needsKeyword ? "1" : "10"} required />
       </label>
