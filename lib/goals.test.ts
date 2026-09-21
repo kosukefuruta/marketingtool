@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatGoalValue, validateGoalValues } from "./goals"
+import { formatGoalValue, goalNameFor, goalSubjectForMetric, validateGoalValues } from "./goals"
 
 describe("goal value validation", () => {
   it("accepts a conversion target above the current value", () => {
@@ -21,6 +21,16 @@ describe("goal value validation", () => {
 
   it("formats a metric with its meaningful unit", () => {
     expect(formatGoalValue("revenue", 120000)).toBe("120,000円")
+  })
+
+  it("requires a keyword only for a ranking goal", () => {
+    expect(goalSubjectForMetric("averagePosition")).toBe("keyword")
+    expect(goalSubjectForMetric("revenue")).toBe("site")
+  })
+
+  it("generates a meaningful goal name from its inputs", () => {
+    expect(goalNameFor("revenue", 120000, null)).toBe("売上高を120,000円にする")
+    expect(goalNameFor("averagePosition", 1, "SEOツール")).toBe("「SEOツール」で1位を目指す")
   })
 
 })

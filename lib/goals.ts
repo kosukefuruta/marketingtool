@@ -33,6 +33,16 @@ export const goalSubjects = {
 
 export type GoalSubject = keyof typeof goalSubjects
 
+export function goalSubjectForMetric(metric: GoalMetric): GoalSubject {
+  return metric === "averagePosition" ? "keyword" : "site"
+}
+
+export function goalNameFor(metric: GoalMetric, target: number, subjectValue: string | null): string {
+  const formattedTarget = formatGoalValue(metric, target)
+  if (metric === "averagePosition" && subjectValue) return `「${subjectValue}」で${formattedTarget}を目指す`
+  return `${goalMetrics[metric].label}を${formattedTarget}にする`
+}
+
 export function isGoalMetric(value: string): value is GoalMetric {
   return value in goalMetrics
 }
