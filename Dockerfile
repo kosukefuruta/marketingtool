@@ -20,9 +20,9 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm build
 RUN pnpm exec esbuild scripts/migrate.ts --bundle --platform=node --format=esm --outfile=.next/migrate.mjs
-RUN pnpm exec esbuild scripts/audit-worker.ts --bundle --platform=node --format=esm --packages=external --outfile=.next/audit-worker.mjs
+RUN pnpm exec esbuild scripts/audit-worker.ts --bundle --platform=node --format=esm --outfile=.next/audit-worker.mjs
 RUN pnpm exec esbuild scripts/start-processes.ts --bundle --platform=node --format=esm --outfile=.next/start-processes.mjs
-RUN pnpm exec esbuild src/audit.ts --bundle --platform=node --format=esm --packages=external --outfile=.next/audit.mjs
+RUN pnpm exec esbuild src/audit.ts --bundle --platform=node --format=esm --external:playwright --external:playwright-core --outfile=.next/audit.mjs
 
 FROM base AS runner
 WORKDIR /app
