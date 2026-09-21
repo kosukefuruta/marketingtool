@@ -31,8 +31,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Google APIから情報を取得できませんでした。"
 }
 
-export async function loadGoogleProperties(accountId: string, requestHeaders: Headers): Promise<GoogleProperties> {
-  const token = await auth.api.getAccessToken({ body: { providerId: "google", accountId }, headers: requestHeaders })
+export async function loadGoogleProperties(providerAccountId: string, requestHeaders: Headers): Promise<GoogleProperties> {
+  const token = await auth.api.getAccessToken({ body: { providerId: "google", accountId: providerAccountId }, headers: requestHeaders })
   const [searchConsole, analytics] = await Promise.allSettled([
     googleJson<{ siteEntry?: SearchConsoleSite[] }>("https://www.googleapis.com/webmasters/v3/sites", token.accessToken),
     googleJson<{ accountSummaries?: Array<{ account: string; displayName: string; propertySummaries?: Array<{ property: string; displayName: string }> }> }>(
