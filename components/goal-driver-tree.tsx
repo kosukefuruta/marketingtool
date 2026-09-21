@@ -8,7 +8,6 @@ function Driver({ driver, currentValues }: { driver: GoalDriver; currentValues: 
       <div><strong>{driver.label}</strong><p>{driver.description}</p>{current?.detail && <p>{current.detail}</p>}</div>
       <dl>
         <div><dt>現在値</dt><dd>{current?.value ?? "未取得"}</dd></div>
-        <div><dt>単位</dt><dd>{driver.unit}</dd></div>
         <div><dt>データ元</dt><dd>{driver.source}</dd></div>
       </dl>
     </div>
