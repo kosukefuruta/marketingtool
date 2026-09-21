@@ -83,6 +83,12 @@ button { cursor: pointer; }
 .table-primary { font-weight: 650; }
 .table-secondary, .url-text { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.property-dialog { width: min(760px, calc(100% - 32px)); max-height: calc(100dvh - 48px); padding: 0; border: 0; border-radius: 16px; color: var(--text); box-shadow: 0 24px 80px #10182840; }
+.property-dialog::backdrop { background: #10182899; }
+.property-dialog-content { padding: 24px; overflow-y: auto; }
+.property-dialog-content h2, .property-dialog-content h3, .property-dialog-content p { margin: 0; }
+.dialog-close { flex: 0 0 auto; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 999px; background: #f2f4f7; color: var(--text); font-size: 24px; line-height: 1; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 12px; position: sticky; bottom: -24px; margin: 0 -24px -24px; padding: 16px 24px; border-top: 1px solid var(--line); background: white; }
 .detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 0; }
 .detail-grid div { min-width: 0; }
 .detail-grid dt { margin-bottom: 3px; }
