@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "seo:audit": "tsx src/audit.ts",
+    "audit:worker": "tsx scripts/audit-worker.ts",
     "dev": "next dev -p 8000",
     "build": "next build",
     "start": "next start -p ${PORT:-8000}",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:integration": "sh scripts/test-integration.sh",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts"
   },

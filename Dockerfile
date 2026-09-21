@@ -20,6 +20,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm build
 RUN pnpm exec esbuild scripts/migrate.ts --bundle --platform=node --format=esm --outfile=.next/migrate.mjs
+RUN pnpm exec esbuild scripts/audit-worker.ts --bundle --platform=node --format=esm --packages=external --outfile=.next/audit-worker.mjs
+RUN pnpm exec esbuild scripts/start-processes.ts --bundle --platform=node --format=esm --outfile=.next/start-processes.mjs
 RUN pnpm exec esbuild src/audit.ts --bundle --platform=node --format=esm --packages=external --outfile=.next/audit.mjs
 
 FROM base AS runner
@@ -28,6 +30,8 @@ COPY --from=builder --chown=pwuser:pwuser /app/.next/standalone ./
 COPY --from=builder --chown=pwuser:pwuser /app/.next/static ./.next/static
 COPY --from=builder --chown=pwuser:pwuser /app/.next/migrate.mjs ./migrate.mjs
 COPY --from=builder --chown=pwuser:pwuser /app/.next/audit.mjs ./audit.mjs
+COPY --from=builder --chown=pwuser:pwuser /app/.next/audit-worker.mjs ./audit-worker.mjs
+COPY --from=builder --chown=pwuser:pwuser /app/.next/start-processes.mjs ./start-processes.mjs
 COPY --from=builder --chown=pwuser:pwuser /app/drizzle ./drizzle
 COPY --from=prod-deps --chown=pwuser:pwuser /app/node_modules/playwright ./node_modules/playwright
 COPY --from=prod-deps --chown=pwuser:pwuser /app/node_modules/playwright-core ./node_modules/playwright-core
@@ -41,4 +45,4 @@ EXPOSE 8000
 
 USER pwuser
 
-CMD ["sh", "-c", "node migrate.mjs && exec node server.js"]
+CMD ["sh", "-c", "node migrate.mjs && exec node start-processes.mjs"]

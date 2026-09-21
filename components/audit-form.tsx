@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useState } from "react"
+import { Fragment, useEffect, useRef, useState } from "react"
 
 type JobResponse = { status: string; progress?: string; error?: string; reportUrl?: string }
 
@@ -18,7 +18,7 @@ function cells(line: string): string[] {
   return line.trim().slice(1, -1).split(/(?<!\\)\|/).map((cell) => cell.trim())
 }
 
-function MarkdownReport({ markdown }: { markdown: string }) {
+export function MarkdownReport({ markdown }: { markdown: string }) {
   const lines = markdown.replaceAll("\r", "").split("\n")
   const nodes: React.ReactNode[] = []
   for (let i = 0; i < lines.length;) {
@@ -46,39 +46,75 @@ function MarkdownReport({ markdown }: { markdown: string }) {
   return <div className="report">{nodes}</div>
 }
 
-export function AuditForm() {
+type AuditFormProps = {
+  endpoint?: string
+  siteUrl?: string
+  maxPages?: number
+  defaultMaxPages?: number
+  initialStatusUrl?: string
+}
+
+export function AuditForm({
+  endpoint = "/api/audit",
+  siteUrl,
+  maxPages = 10,
+  defaultMaxPages = 10,
+  initialStatusUrl,
+}: AuditFormProps = {}) {
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
+  const pollController = useRef<AbortController | null>(null)
 
-  async function submit(formData: FormData) {
-    setRunning(true); setError(null); setReport(null); setStatus("診断の準備中です。")
+  async function poll(statusUrl: string) {
+    pollController.current?.abort()
+    const controller = new AbortController()
+    pollController.current = controller
+    setRunning(true); setError(null); setStatus("診断状況を確認しています。")
     try {
-      const response = await fetch("/api/audit", { method: "POST", body: formData })
-      const started = await response.json() as { statusUrl?: string; error?: string }
-      if (!response.ok || !started.statusUrl) throw new Error(started.error ?? "診断を開始できませんでした。")
       while (true) {
-        await wait(2000)
-        const statusResponse = await fetch(started.statusUrl, { cache: "no-store" })
+        const statusResponse = await fetch(statusUrl, { cache: "no-store", signal: controller.signal })
         const job = await statusResponse.json() as JobResponse
         if (!statusResponse.ok) throw new Error(job.error ?? "診断状況を取得できませんでした。")
         if (job.status === "error") throw new Error(job.error ?? "診断に失敗しました。")
-        if (job.status !== "done") { setStatus(job.progress ?? "診断中です。"); continue }
+        if (job.status !== "done") { setStatus(job.progress ?? "診断中です。"); await wait(2000); continue }
         if (!job.reportUrl) throw new Error("レポートが見つかりません。")
-        const reportResponse = await fetch(job.reportUrl, { cache: "no-store" })
+        const reportResponse = await fetch(job.reportUrl, { cache: "no-store", signal: controller.signal })
         if (!reportResponse.ok) throw new Error("レポートを取得できませんでした。")
         setReport(await reportResponse.text()); setStatus("診断が完了しました。"); break
       }
     } catch (cause) {
+      if (controller.signal.aborted) return
       setError(cause instanceof Error ? cause.message : String(cause)); setStatus(null)
-    } finally { setRunning(false) }
+    } finally {
+      if (!controller.signal.aborted) setRunning(false)
+    }
+  }
+
+  useEffect(() => {
+    if (initialStatusUrl) void poll(initialStatusUrl)
+    return () => pollController.current?.abort()
+  }, [initialStatusUrl])
+
+  async function submit(formData: FormData) {
+    setRunning(true); setError(null); setReport(null); setStatus("診断の準備中です。")
+    try {
+      const response = await fetch(endpoint, { method: "POST", body: formData })
+      const started = await response.json() as { statusUrl?: string; error?: string }
+      if (!response.ok || !started.statusUrl) throw new Error(started.error ?? "診断を開始できませんでした。")
+      await poll(started.statusUrl)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause)); setStatus(null); setRunning(false)
+    }
   }
 
   return <section className="card">
     <form className="stack" action={submit}>
-      <label className="field">診断するURL<input name="url" type="url" placeholder="https://example.com" required /></label>
-      <label className="field">最大ページ数<input name="max" type="number" min="1" max="10" defaultValue="10" required /></label>
+      {siteUrl
+        ? <div className="field"><span>診断するサイト</span><strong>{siteUrl}</strong><input name="url" type="hidden" value={siteUrl} /></div>
+        : <label className="field">診断するURL<input name="url" type="url" placeholder="https://example.com" required /></label>}
+      <label className="field">最大ページ数<input name="max" type="number" min="1" max={maxPages} defaultValue={Math.min(defaultMaxPages, maxPages)} required /></label>
       <button className="button" disabled={running}>{running ? "診断中です" : "診断を開始"}</button>
     </form>
     {status && <p className="status" aria-live="polite">{status}</p>}

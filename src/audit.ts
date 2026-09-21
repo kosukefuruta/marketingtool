@@ -6,8 +6,10 @@ import { isIP } from 'node:net'
 const input = process.argv[2]
 const maxArg = process.argv.find((arg) => arg.startsWith('--max='))
 const outputArg = process.argv.find((arg) => arg.startsWith('--output='))
+const jsonOutputArg = process.argv.find((arg) => arg.startsWith('--json-output='))
 const maxPages = Number(maxArg?.slice('--max='.length) ?? 100)
 const outputPath = outputArg?.slice('--output='.length) || 'seo-report.md'
+const jsonOutputPath = jsonOutputArg?.slice('--json-output='.length)
 
 if (!input) {
   console.error('使い方: pnpm seo:audit <URL> [--max=100] [--output=seo-report.md]')
@@ -577,5 +579,19 @@ ${pageSections}
 `
 
 writeFileSync(outputPath, report, 'utf8')
+if (jsonOutputPath) {
+  writeFileSync(jsonOutputPath, JSON.stringify({
+    summary: {
+      auditedPages: results.length,
+      discoveredUrls: queued.size,
+      goodCount: evaluationCounts['良好'],
+      reviewCount: evaluationCounts['要確認'],
+      improveCount: evaluationCounts['要改善'],
+      unreachableCount: evaluationCounts['取得不能'],
+    },
+    siteChecks: siteDiagnostics,
+    pages: pageDiagnosticSets.map(({ page, rows }) => ({ page, checks: rows })),
+  }), 'utf8')
+}
 console.log(`診断完了: ${outputPath}`)
 console.log(`評価: 良好 ${evaluationCounts['良好']}件 / 要確認 ${evaluationCounts['要確認']}件 / 要改善 ${evaluationCounts['要改善']}件 / 取得不能 ${evaluationCounts['取得不能']}件`)
