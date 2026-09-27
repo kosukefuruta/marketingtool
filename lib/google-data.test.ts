@@ -18,8 +18,8 @@ describe("Google goal metrics", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => jsonResponse({}))
     const result = await loadGoogleGoalMetrics("empty-account", new Headers(), "sc-domain:example.com", null, ["keyword"])
 
-    expect(result.values.impressions).toEqual({ value: "0回" })
-    expect(result.values["organic-clicks"]).toEqual({ value: "0クリック" })
+    expect(result.values.impressions).toEqual({ value: "0回", amount: 0 })
+    expect(result.values["organic-clicks"]).toEqual({ value: "0クリック", amount: 0 })
     expect(result.values.ctr).toEqual({ value: "算出不可", detail: "対象期間の検索表示回数が0回のため、CTRを算出できません。" })
     expect(result.observations.ctr).toBeUndefined()
     expect(result.keywordValues.keyword).toEqual({
@@ -76,7 +76,7 @@ describe("Google goal metrics", () => {
   it("treats a successful empty organic GA4 report as zero sessions", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => jsonResponse({}))
     const result = await loadGoogleGoalMetrics("empty-ga-account", new Headers(), null, "properties/123")
-    expect(result.values["organic-sessions"]).toEqual({ value: "0セッション" })
+    expect(result.values["organic-sessions"]).toEqual({ value: "0セッション", amount: 0 })
     expect(result.errors).toEqual([])
   })
 

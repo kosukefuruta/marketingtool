@@ -83,6 +83,22 @@ if (!enabled) {
     expect(updated.name).toBe("コンバージョン数を25件にする")
   })
 
+  it("drops a baseline recorded in the previous metric's unit", async () => {
+    await seedGoal({ metric: "revenue", name: "売上高を300,000円にする", targetValue: 300000, baselineValue: 100000 })
+
+    await updateGoal({}, form({ siteId: "s1", goalId: "g1", metric: "averagePosition", targetValue: "3", subjectValue: "SEOツール" }))
+
+    expect((await loadGoal()).baselineValue).toBeNull()
+  })
+
+  it("keeps the baseline while the metric stays the same", async () => {
+    await seedGoal({ metric: "revenue", name: "売上高を300,000円にする", targetValue: 300000, baselineValue: 100000 })
+
+    await updateGoal({}, form({ siteId: "s1", goalId: "g1", metric: "revenue", targetValue: "400000" }))
+
+    expect((await loadGoal()).baselineValue).toBe(100000)
+  })
+
   it("removes the key events and CTA pages a metric without funnel stages cannot use", async () => {
     await seedGoal()
     const now = new Date()

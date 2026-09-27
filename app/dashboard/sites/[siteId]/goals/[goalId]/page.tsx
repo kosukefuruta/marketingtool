@@ -7,6 +7,7 @@ import { GoalEditForm } from "@/components/goal-edit-form"
 import { GoalCtaPageForm } from "@/components/goal-cta-page-form"
 import { GoalKeyEventForm } from "@/components/goal-key-event-form"
 import { GoalPageRpmForm } from "@/components/goal-page-rpm-form"
+import { GoalProgressBar } from "@/components/goal-progress-bar"
 import { GoalScenarios } from "@/components/goal-scenarios"
 import { db } from "@/lib/db"
 import { account, goal, goalCtaPage, goalKeyEvent, site } from "@/lib/db/schema"
@@ -14,6 +15,7 @@ import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type An
 import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
 import { assumedDriverValues, buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, isGoalMetric } from "@/lib/goals"
+import { goalPeriodComparison, goalProgress } from "@/lib/goal-progress"
 import { requireSession } from "@/lib/session"
 import { isSiteCategory, siteCategories } from "@/lib/site-categories"
 
@@ -79,6 +81,8 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
   }
   const keywordActual = item.metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
   const currentActual = keywordActual ?? actuals?.goalValues[item.id]?.["goal-total"] ?? googleValueForGoal(item.metric, actuals)
+  const comparison = goalPeriodComparison(item.period)
+  const progress = comparison.comparable ? goalProgress(item.metric, currentActual?.amount, item.targetValue) : null
   const phase = actuals?.goalObservations[item.id] && Object.keys(actuals.goalObservations[item.id]).length > 0 ? "実測補正中" : breakdown?.phase ?? "未定義"
   return <div className="stack">
     <div><h2>{item.name}</h2><p className="muted">目標を数値ドライバーへ分解し、現在値との差から施策を考えます。</p></div>
@@ -91,6 +95,8 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
         <div><span>現在値</span><strong>{currentActual?.value ?? (item.baselineValue === null ? "未取得" : formatGoalValue(item.metric, item.baselineValue))}</strong></div>
       </div>
       {currentActual?.detail && <p className="muted">直近28日間: {currentActual.detail}</p>}
+      {progress && <GoalProgressBar progress={progress} note={comparison.comparable ? comparison.note ?? undefined : undefined} />}
+      {!comparison.comparable && currentActual?.amount !== undefined && <p className="muted">{comparison.reason}</p>}
       <GoalEditForm siteId={siteId} goal={{ id: item.id, metric: item.metric, subjectValue: item.subjectValue, targetValue: item.targetValue }} siteCategory={category} />
       {keyEventStagesForMetric(item.metric).length > 0 && <GoalKeyEventForm siteId={siteId} goalId={item.id} metric={item.metric} available={availableKeyEvents} selected={groupGoalKeyEvents(savedKeyEvents)} loadError={keyEventsError} />}
       {keyEventStagesForMetric(item.metric).length > 0 && <GoalCtaPageForm siteId={siteId} goalId={item.id} siteOrigin={registeredSite.normalizedOrigin} paths={savedCtaPages.map((entry) => entry.path)} />}

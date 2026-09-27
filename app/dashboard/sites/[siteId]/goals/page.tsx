@@ -9,6 +9,7 @@ import { GoalCtaPageForm } from "@/components/goal-cta-page-form"
 import { GoalForm } from "@/components/goal-form"
 import { GoalKeyEventForm } from "@/components/goal-key-event-form"
 import { GoalPageRpmForm } from "@/components/goal-page-rpm-form"
+import { GoalProgressBar } from "@/components/goal-progress-bar"
 import { GoalScenarios } from "@/components/goal-scenarios"
 import { db } from "@/lib/db"
 import { account, goal, goalCtaPage, goalKeyEvent, site } from "@/lib/db/schema"
@@ -16,6 +17,7 @@ import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type An
 import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
 import { assumedDriverValues, buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, goalSubjects, isGoalMetric, isGoalPeriod, isGoalSubject } from "@/lib/goals"
+import { goalPeriodComparison, goalProgress } from "@/lib/goal-progress"
 import { requireSession } from "@/lib/session"
 import { isSiteCategory } from "@/lib/site-categories"
 
@@ -109,6 +111,8 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
         const keywordActual = metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
         const metricActual = metric ? googleValueForGoal(metric, actuals) : null
         const currentActual = keywordActual ?? actuals?.goalValues[item.id]?.["goal-total"] ?? metricActual
+        const comparison = goalPeriodComparison(item.period)
+        const progress = metric && comparison.comparable ? goalProgress(metric, currentActual?.amount, item.targetValue) : null
         const selectedKeyEvents = groupGoalKeyEvents(savedKeyEvents.filter((entry) => entry.goalId === item.id))
         const ctaPaths = savedCtaPages.filter((entry) => entry.goalId === item.id).map((entry) => entry.path)
         return <article className="goal-card stack" id={`goal-${item.id}`} key={item.id}>
@@ -120,6 +124,8 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
             <div><dt>{periodLabel}</dt><dd><strong>{metric && goalMetrics[metric].direction === "decrease" ? "≤ " : "≥ "}{metric ? formatGoalValue(metric, item.targetValue) : item.targetValue}</strong></dd></div>
           </dl>
           {currentActual?.detail && <p className="muted">直近28日間: {currentActual.detail}</p>}
+          {progress && <GoalProgressBar progress={progress} note={comparison.comparable ? comparison.note ?? undefined : undefined} />}
+          {!comparison.comparable && currentActual?.amount !== undefined && <p className="muted">{comparison.reason}</p>}
           {metric && <GoalEditForm siteId={siteId} goal={{ id: item.id, metric, subjectValue: item.subjectValue, targetValue: item.targetValue }} siteCategory={siteCategory} />}
           {metric && keyEventStagesForMetric(metric).length > 0 && <GoalKeyEventForm siteId={siteId} goalId={item.id} metric={metric} available={availableKeyEvents} selected={selectedKeyEvents} loadError={keyEventsError} />}
           {metric && keyEventStagesForMetric(metric).length > 0 && <GoalCtaPageForm siteId={siteId} goalId={item.id} siteOrigin={registeredSite.normalizedOrigin} paths={ctaPaths} />}

@@ -270,6 +270,8 @@ export async function updateGoal(_state: GoalEditFormState, formData: FormData):
       metric,
       targetValue,
       period: goalMetrics[metric].defaultPeriod,
+      // 旧指標の単位で保存された現在値を持ち越さない。
+      ...(metric === existing.metric ? {} : { baselineValue: null }),
       ...(change.removesPageRpm ? { pageRpm: null, pageRpmRevenue: null, pageRpmPageviews: null } : {}),
       ...(pageRpm ? { pageRpm: null, pageRpmRevenue: pageRpm.revenue, pageRpmPageviews: pageRpm.pageviews } : {}),
       updatedAt: now,

@@ -35,7 +35,7 @@ async function googleJson<T>(url: string, accessToken: string, init?: RequestIni
   return response.json() as Promise<T>
 }
 
-export type GoogleGoalValue = { value: string; detail?: string }
+export type GoogleGoalValue = { value: string; detail?: string; amount?: number }
 export type NumericObservation = { value: number; weight: number }
 export type GoalAnalyticsConfig = {
   goalId: string
@@ -149,12 +149,13 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
     const row = report.rows?.[0]
     const impressions = row?.impressions ?? 0
     const clicks = row?.clicks ?? 0
-    values.impressions = { value: `${number.format(impressions)}回` }
-    values["organic-clicks"] = { value: `${number.format(clicks)}クリック` }
+    values.impressions = { value: `${number.format(impressions)}回`, amount: impressions }
+    values["organic-clicks"] = { value: `${number.format(clicks)}クリック`, amount: clicks }
     if (impressions > 0) {
       const estimate = updateRate(clicks, impressions)
       if (estimate && estimate.observed !== null) values.ctr = {
         value: `${number.format(estimate.observed * 100)}%`,
+        amount: estimate.observed * 100,
         detail: `実測 ${number.format(clicks)} / ${number.format(impressions)}、推定中央値 ${number.format(estimate.median * 100)}%、70%信用区間 ${number.format(estimate.low * 100)}〜${number.format(estimate.high * 100)}%`,
       }
       observations.ctr = { successes: clicks, trials: impressions }
@@ -175,6 +176,7 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
       const row = report.rows?.[0]
       if (row?.position !== undefined) keywordValues[keyword] = {
         value: `${number.format(row.position)}位`,
+        amount: row.position,
         detail: `表示 ${number.format(row.impressions ?? 0)}回、クリック ${number.format(row.clicks ?? 0)}回、CTR ${number.format((row.ctr ?? 0) * 100)}%`,
       }
       else keywordValues[keyword] = { value: "データなし", detail: "対象期間に、このキーワードの検索表示データはありません。" }
@@ -191,10 +193,10 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body({ metrics: ["sessions", "screenPageViews", "screenPageViewsPerSession", "totalAdRevenue"].map((name) => ({ name })) })),
     }).then((report) => {
       const sessions = metricNumber(report, 0); const views = metricNumber(report, 1); const viewsPerSession = metricNumber(report, 2); const adRevenue = metricNumber(report, 3)
-      if (sessions !== null) values.sessions = { value: `${number.format(sessions)}セッション` }
-      if (views !== null) values.pageviews = { value: `${number.format(views)}PV` }
+      if (sessions !== null) values.sessions = { value: `${number.format(sessions)}セッション`, amount: sessions }
+      if (views !== null) values.pageviews = { value: `${number.format(views)}PV`, amount: views }
       if (viewsPerSession !== null) values["pages-per-session"] = { value: `${number.format(viewsPerSession)}PV` }
-      if (adRevenue !== null && report.metadata?.currencyCode === "JPY") values["ad-revenue"] = { value: `${number.format(adRevenue)}円` }
+      if (adRevenue !== null && report.metadata?.currencyCode === "JPY") values["ad-revenue"] = { value: `${number.format(adRevenue)}円`, amount: adRevenue }
       if (views !== null && views > 0 && adRevenue !== null && report.metadata?.currencyCode === "JPY") {
         const rpm = adRevenue / views * 1000
         const weight = views / (views + RPM_PRIOR_PAGEVIEWS)
@@ -210,7 +212,7 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
     }).then((report) => {
       const organic = metricNumber(report, 0)
       organicSessions = organic ?? 0
-      values["organic-sessions"] = { value: `${number.format(organic ?? 0)}セッション` }
+      values["organic-sessions"] = { value: `${number.format(organic ?? 0)}セッション`, amount: organic ?? 0 }
     }).catch((error) => { hasApiError = true; errors.push(`GA4（自然検索）: ${errorMessage(error)}`) }))
 
     type GoalCounts = {
@@ -292,14 +294,14 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
         if (count.conversionSessions !== undefined) {
           const conversionValue = { value: `${number.format(count.conversionSessions)}セッション`, detail: "直近28日の自然検索経由" }
           valuesForGoal["conversion-sessions"] = conversionValue
-          valuesForGoal["goal-total"] = { value: `${number.format(count.conversionSessions)}件`, detail: "直近28日に自然検索経由で選択キーイベントが発生したセッション数" }
+          valuesForGoal["goal-total"] = { value: `${number.format(count.conversionSessions)}件`, detail: "直近28日に自然検索経由で選択キーイベントが発生したセッション数", amount: count.conversionSessions }
         }
         addRate("cta-cvr", count.conversionSessions, count.cta, "CV発生セッション", "CTA到達セッション（推定比）")
       } else {
         if (count.freeSessions !== undefined) valuesForGoal["free-conversion-sessions"] = { value: `${number.format(count.freeSessions)}セッション`, detail: "直近28日の自然検索経由" }
         if (count.paidSessions !== undefined) {
           valuesForGoal["paid-conversion-sessions"] = { value: `${number.format(count.paidSessions)}セッション`, detail: "直近28日の自然検索経由" }
-          valuesForGoal["goal-total"] = { value: `${number.format(count.paidSessions)}件`, detail: "直近28日に自然検索経由で有料契約キーイベントが発生したセッション数" }
+          valuesForGoal["goal-total"] = { value: `${number.format(count.paidSessions)}件`, detail: "直近28日に自然検索経由で有料契約キーイベントが発生したセッション数", amount: count.paidSessions }
         }
         addRate("free-cvr", count.freeSessions, count.cta, "無料登録セッション", "CTA到達セッション（推定比）")
         addRate("paid-rate", count.paidLongSessions, count.freeLongSessions, "有料契約発生セッション（直近180日）", "無料登録発生セッション（直近180日）")
