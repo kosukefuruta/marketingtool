@@ -2,7 +2,10 @@ import { KeywordDemandTable } from "@/components/keyword-demand-table"
 import type { SearchQueryMetric } from "@/lib/google-data"
 import { loadKeywordDemand } from "@/lib/keyword-demand"
 
-/** 検索ボリュームの取得は外部APIに依存するため、Suspenseで囲んでページ全体を待たせない。 */
+/**
+ * Suspenseで囲むと、ストリーミングの差し替えが本番環境で完了せず、フォールバックのまま固定された。
+ * 他のGoogleデータと同じくページ内で待つ。取得は10秒で打ち切り、ボリュームは7日キャッシュする。
+ */
 export async function KeywordDemandSection({ queries }: { queries: SearchQueryMetric[] }) {
   const demand = await loadKeywordDemand(queries)
   if (demand.rows.length === 0) return null
@@ -14,11 +17,5 @@ export async function KeywordDemandSection({ queries }: { queries: SearchQueryMe
     </div>
     {demand.error && <p className="error" role="alert">{demand.error}</p>}
     <KeywordDemandTable rows={demand.rows} />
-  </section>
-}
-
-export function KeywordDemandFallback() {
-  return <section className="card stack">
-    <div><h2>検索需要</h2><p className="muted">検索ボリュームを取得しています…</p></div>
   </section>
 }

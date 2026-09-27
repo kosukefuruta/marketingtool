@@ -1,11 +1,10 @@
 import { and, asc, eq } from "drizzle-orm"
-import { Suspense } from "react"
 import { headers } from "next/headers"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { ActionCandidates } from "@/components/action-candidates"
 import { GoalDriverTree } from "@/components/goal-driver-tree"
-import { KeywordDemandFallback, KeywordDemandSection } from "@/components/keyword-demand-section"
+import { KeywordDemandSection } from "@/components/keyword-demand-section"
 import { GoalEditForm } from "@/components/goal-edit-form"
 import { GoalCtaPageForm } from "@/components/goal-cta-page-form"
 import { GoalKeyEventForm } from "@/components/goal-key-event-form"
@@ -145,9 +144,7 @@ export default async function GoalDetailPage({ params, searchParams }: { params:
       <GoalDriverTree drivers={breakdown.drivers} currentValues={currentValues} requirements={requirements} />
       <p className="muted">各データ元を連携すると現在値を取得し、目標達成に必要な値と優先する施策を計算します。</p>
     </section> : <section className="card"><h2>目標のブレークダウン</h2><p className="muted">この指標のブレークダウンはまだ定義されていません。</p></section>}
-    {paidAccess && (actuals?.searchQueries.length ?? 0) > 0 && <Suspense fallback={<KeywordDemandFallback />}>
-      <KeywordDemandSection queries={actuals?.searchQueries ?? []} />
-    </Suspense>}
+    {paidAccess && (actuals?.searchQueries.length ?? 0) > 0 && <KeywordDemandSection queries={actuals?.searchQueries ?? []} />}
     {rankCandidates.length > 0 && <section className="card stack">
       <div><h2>差分を埋める施策候補</h2><p className="muted">検索表示回数を増やすための候補です。1ページ目の手前にあり、表示回数が多い順に並べています。</p></div>
       <ActionCandidates candidates={rankCandidates} />
