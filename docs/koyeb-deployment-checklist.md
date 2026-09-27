@@ -25,6 +25,8 @@
 | `SES_SECRET_ACCESS_KEY` | 上記IAMキーのSecret |
 | `STRIPE_SECRET_KEY` | Stripe本番用Secret key |
 | `STRIPE_WEBHOOK_SECRET` | Stripe Webhook endpoint作成後に表示されるSigning secret |
+| `DATAFORSEO_LOGIN` | DataForSEOダッシュボードのAPI Accessタブに表示されるAPI login。アカウントのメールアドレスと同じ |
+| `DATAFORSEO_PASSWORD` | 同じくAPI Accessタブに表示されるAPI password。**管理画面のログインパスワードとは別の値** |
 
 ## Koyeb環境変数
 
@@ -37,6 +39,7 @@
 | `MAIL_FROM` | `Owtell <support@tool.owtell.com>` |
 | `STRIPE_PRICE_ID` | 月額1,980円プランの本番Price ID |
 | `TRUSTED_PROXY_HEADER` | `x-forwarded-for`（Koyebが末尾へ追加する送信元IPを使用） |
+| `DATAFORSEO_BASE_URL` | 任意。未設定なら`https://api.dataforseo.com`。Sandboxを使うときだけ設定する |
 
 Koyebが与える`PORT`はアプリが自動で利用するため、通常は手動設定しない。
 `TRUSTED_PROXY_HEADER`には、利用するプロキシが保証するヘッダーだけを設定する。Koyebでは`x-forwarded-for`の末尾IPだけが真正と保証されるため、アプリも末尾を利用する。未設定または不正なIPの場合は、無料診断のレート制限上、安全側の共通キーとして扱われる。
