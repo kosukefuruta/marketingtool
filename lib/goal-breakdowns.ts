@@ -28,6 +28,7 @@ const organicSessions: GoalDriver = {
   children: [
     { id: "impressions", label: "検索表示回数", unit: "回/月", source: "Search Console", description: "検索結果にページが表示された回数" },
     { id: "ctr", label: "検索CTR", unit: "%", source: "Search Console", description: "検索表示からクリックされた割合" },
+    { id: "organic-clicks", label: "検索クリック数", unit: "クリック/月", source: "Search Console", description: "検索結果からサイトへ移動した回数。GA4の自然検索セッション数との差は、同一セッション内の複数クリックや計測方式の違いによる" },
   ],
 }
 
@@ -119,10 +120,76 @@ function updatedRates(initial: [number, number, number], observation?: RateObser
   return estimate ? [estimate.low, estimate.median, estimate.high] : initial
 }
 
+const ctaRatePrior: [number, number, number] = [0.02, 0.03, 0.05]
+const ctaCvrPrior: [number, number, number] = [0.005, 0.01, 0.02]
+const freeCvrPrior: [number, number, number] = [0.03, 0.05, 0.1]
+const paidRatePrior: [number, number, number] = [0.05, 0.1, 0.2]
+
+type PageRpmBand = { values: [number, number, number]; label: string; note: string | null }
+
+function pageRpmBand(category: SiteCategory, numericObservations: Record<string, NumericObservation>, manualPageRpmRevenue?: number | null, manualPageRpmPageviews?: number | null): PageRpmBand {
+  const manualObservation = parsePageRpmObservation(String(manualPageRpmRevenue ?? ""), String(manualPageRpmPageviews ?? "")).value
+  const validManualObservation = manualObservation ? { value: manualObservation.rpm, weight: manualObservation.weight } : null
+  const candidateRpm = numericObservations["page-rpm"]
+  const measuredRpm = candidateRpm
+    && Number.isFinite(candidateRpm.value) && candidateRpm.value >= 0
+    && Number.isFinite(candidateRpm.weight) && candidateRpm.weight >= 0 && candidateRpm.weight <= 1
+    ? candidateRpm : null
+  const observation = validManualObservation ?? measuredRpm
+  const values = siteCategories[category].rpm.map((initialRpm) => observation
+    ? (1 - observation.weight) * initialRpm + observation.weight * observation.value
+    : initialRpm) as [number, number, number]
+  const note = observation ? `${validManualObservation ? "手入力・" : ""}実測補正 ${Math.round(observation.weight * 100)}%` : null
+  return { values, label: note ? `ページRPM（${note}）` : "ページRPM", note }
+}
+
+function yen(value: number): string {
+  return `${Math.round(value).toLocaleString("ja-JP")}円`
+}
+
+export type DriverValue = { value: string; detail?: string; assumed?: boolean }
+
+function assumedRate(prior: [number, number, number], observation?: RateObservation): DriverValue {
+  const [low, median, high] = updatedRates(prior, observation)
+  return {
+    value: percentage(median),
+    detail: `${observation ? "実測で補正した仮定値" : "初期仮定値"}（慎重 ${percentage(low)} 〜 好調 ${percentage(high)}）`,
+    assumed: true,
+  }
+}
+
+// Fills the drivers Google cannot measure for us, so a breakdown never shows an empty column.
+export function assumedDriverValues(metric: GoalMetric, category?: SiteCategory | null, observations: Record<string, RateObservation> = {}, numericObservations: Record<string, NumericObservation> = {}, manualPageRpmRevenue?: number | null, manualPageRpmPageviews?: number | null): Record<string, DriverValue> {
+  if (metric === "conversions") {
+    return {
+      "cta-rate": assumedRate(ctaRatePrior, observations["cta-rate"]),
+      "cta-cvr": assumedRate(ctaCvrPrior, observations["cta-cvr"]),
+    }
+  }
+  if (metric === "paidContracts") {
+    return {
+      "cta-rate": assumedRate(ctaRatePrior, observations["cta-rate"]),
+      "free-cvr": assumedRate(freeCvrPrior, observations["free-cvr"]),
+      "paid-rate": assumedRate(paidRatePrior, observations["paid-rate"]),
+    }
+  }
+  if (metric === "adRevenue" && category) {
+    const band = pageRpmBand(category, numericObservations, manualPageRpmRevenue, manualPageRpmPageviews)
+    return {
+      "page-rpm": {
+        value: `${yen(band.values[1])}/1,000PV`,
+        detail: `${band.note ?? `${siteCategories[category].label}の初期仮定値`}（慎重 ${yen(band.values[0])} 〜 好調 ${yen(band.values[2])}）`,
+        assumed: true,
+      },
+    }
+  }
+  return {}
+}
+
 export function buildGoalScenarios(metric: GoalMetric, target: number, category?: SiteCategory | null, observations: Record<string, RateObservation> = {}, numericObservations: Record<string, NumericObservation> = {}, manualPageRpmRevenue?: number | null, manualPageRpmPageviews?: number | null): GoalScenario[] {
   if (metric === "conversions") {
-    const ctaRates = updatedRates([0.02, 0.03, 0.05], observations["cta-rate"])
-    const conversionRates = updatedRates([0.005, 0.01, 0.02], observations["cta-cvr"])
+    const ctaRates = updatedRates(ctaRatePrior, observations["cta-rate"])
+    const conversionRates = updatedRates(ctaCvrPrior, observations["cta-cvr"])
     return scenarioLabels.map(({ id, label }, index) => {
       const ctaRate = ctaRates[index]; const cvr = conversionRates[index]
       return {
@@ -136,9 +203,9 @@ export function buildGoalScenarios(metric: GoalMetric, target: number, category?
     })
   }
   if (metric === "paidContracts") {
-    const ctaRates = updatedRates([0.02, 0.03, 0.05], observations["cta-rate"])
-    const freeRates = updatedRates([0.03, 0.05, 0.1], observations["free-cvr"])
-    const paidRates = updatedRates([0.05, 0.1, 0.2], observations["paid-rate"])
+    const ctaRates = updatedRates(ctaRatePrior, observations["cta-rate"])
+    const freeRates = updatedRates(freeCvrPrior, observations["free-cvr"])
+    const paidRates = updatedRates(paidRatePrior, observations["paid-rate"])
     return scenarioLabels.map(({ id, label }, index) => {
       const ctaRate = ctaRates[index]; const freeCvr = freeRates[index]; const paidRate = paidRates[index]
       return {
@@ -157,22 +224,12 @@ export function buildGoalScenarios(metric: GoalMetric, target: number, category?
     })
   }
   if (metric === "adRevenue" && category) {
-    const manualObservation = parsePageRpmObservation(String(manualPageRpmRevenue ?? ""), String(manualPageRpmPageviews ?? "")).value
-    const validManualObservation = manualObservation ? { value: manualObservation.rpm, weight: manualObservation.weight } : null
-    const candidateRpm = numericObservations["page-rpm"]
-    const measuredRpm = candidateRpm
-      && Number.isFinite(candidateRpm.value) && candidateRpm.value >= 0
-      && Number.isFinite(candidateRpm.weight) && candidateRpm.weight >= 0 && candidateRpm.weight <= 1
-      ? candidateRpm : null
-    const rpmObservation = validManualObservation ?? measuredRpm
+    const band = pageRpmBand(category, numericObservations, manualPageRpmRevenue, manualPageRpmPageviews)
     return scenarioLabels.map(({ id, label }, index) => {
-      const initialRpm = siteCategories[category].rpm[index]
-      const rpm = rpmObservation
-        ? (1 - rpmObservation.weight) * initialRpm + rpmObservation.weight * rpmObservation.value
-        : initialRpm
+      const rpm = band.values[index]
       return {
         id, label,
-        assumptions: [{ label: rpmObservation ? `ページRPM（${validManualObservation ? "手入力・" : ""}実測補正 ${Math.round(rpmObservation.weight * 100)}%）` : "ページRPM", value: `${Math.round(rpm).toLocaleString("ja-JP")}円` }],
+        assumptions: [{ label: band.label, value: yen(rpm) }],
         requirements: [{ label: "ページビュー数", value: Math.ceil(target / rpm * 1000), unit: "PV/月" }],
       }
     })

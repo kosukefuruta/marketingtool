@@ -147,16 +147,20 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
     { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ startDate, endDate }) },
   ).then((report) => {
     const row = report.rows?.[0]
-    values.impressions = { value: `${number.format(row?.impressions ?? 0)}回` }
-    values["organic-clicks"] = { value: `${number.format(row?.clicks ?? 0)}クリック` }
-    const clicks = row?.clicks; const impressions = row?.impressions
-    if (clicks !== undefined && impressions !== undefined) {
+    const impressions = row?.impressions ?? 0
+    const clicks = row?.clicks ?? 0
+    values.impressions = { value: `${number.format(impressions)}回` }
+    values["organic-clicks"] = { value: `${number.format(clicks)}クリック` }
+    if (impressions > 0) {
       const estimate = updateRate(clicks, impressions)
       if (estimate && estimate.observed !== null) values.ctr = {
         value: `${number.format(estimate.observed * 100)}%`,
         detail: `実測 ${number.format(clicks)} / ${number.format(impressions)}、推定中央値 ${number.format(estimate.median * 100)}%、70%信用区間 ${number.format(estimate.low * 100)}〜${number.format(estimate.high * 100)}%`,
       }
-      if (impressions > 0) observations.ctr = { successes: clicks, trials: impressions }
+      observations.ctr = { successes: clicks, trials: impressions }
+    } else {
+      // Keep CTR consistent with the impressions it divides: 0 / 0 has no rate to show.
+      values.ctr = { value: "算出不可", detail: "対象期間の検索表示回数が0回のため、CTRを算出できません。" }
     }
   }).catch((error) => { hasApiError = true; errors.push(`Search Console: ${errorMessage(error)}`) }))
   if (searchConsoleProperty) tasks.push(runWithConcurrency(keywords, KEYWORD_REQUEST_CONCURRENCY, async (keyword) => {

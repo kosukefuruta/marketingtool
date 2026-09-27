@@ -12,7 +12,7 @@ import { db } from "@/lib/db"
 import { account, goal, goalCtaPage, goalKeyEvent, site } from "@/lib/db/schema"
 import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent, type GoalAnalyticsConfig } from "@/lib/google-data"
 import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
-import { buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
+import { assumedDriverValues, buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, isGoalMetric } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
 import { isSiteCategory, siteCategories } from "@/lib/site-categories"
@@ -72,6 +72,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
   const observations = { ...actuals?.observations, ...actuals?.goalObservations[item.id] }
   const scenarios = buildGoalScenarios(item.metric, item.targetValue, category, observations, actuals?.numericObservations, item.pageRpmRevenue, item.pageRpmPageviews)
   const currentValues = {
+    ...assumedDriverValues(item.metric, category, observations, actuals?.numericObservations, item.pageRpmRevenue, item.pageRpmPageviews),
     ...actuals?.values,
     ...actuals?.goalValues[item.id],
     ...(item.pageRpmRevenue === null || item.pageRpmPageviews === null ? {} : { "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue / item.pageRpmPageviews * 1000)}円/1,000PV`, detail: `広告収益 ${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue)}円 / ${new Intl.NumberFormat("ja-JP").format(item.pageRpmPageviews)}PV` } }),
