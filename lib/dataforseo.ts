@@ -16,6 +16,7 @@ const VOLUME_CACHE_MS = 7 * 24 * 60 * 60 * 1000
 
 export class DataForSeoError extends Error {}
 
+// loginはアカウントのメールアドレス、passwordはAPI Accessタブの専用値（管理画面のログインパスワードとは別）。
 function credentials(): string {
   const login = process.env.DATAFORSEO_LOGIN
   const password = process.env.DATAFORSEO_PASSWORD

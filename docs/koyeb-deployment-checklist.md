@@ -25,8 +25,8 @@
 | `SES_SECRET_ACCESS_KEY` | 上記IAMキーのSecret |
 | `STRIPE_SECRET_KEY` | Stripe本番用Secret key |
 | `STRIPE_WEBHOOK_SECRET` | Stripe Webhook endpoint作成後に表示されるSigning secret |
-| `DATAFORSEO_LOGIN` | DataForSEOダッシュボードのAPI Accessタブに表示されるAPI login。**管理画面のログインメールアドレスとは別** |
-| `DATAFORSEO_PASSWORD` | 同じくAPI Accessタブに表示されるAPI password。**管理画面のログインパスワードとは別** |
+| `DATAFORSEO_LOGIN` | DataForSEOダッシュボードのAPI Accessタブに表示されるAPI login。アカウントのメールアドレスと同じ |
+| `DATAFORSEO_PASSWORD` | 同じくAPI Accessタブに表示されるAPI password。**管理画面のログインパスワードとは別の値** |
 
 ## Koyeb環境変数
 
