@@ -29,7 +29,7 @@ describe("Google goal metrics", () => {
     expect(result.errors).toEqual([])
 
     await loadGoogleGoalMetrics("empty-account", new Headers(), "sc-domain:example.com", null, ["keyword"])
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it("reports a measured CTR once impressions exist", async () => {
@@ -64,13 +64,38 @@ describe("Google goal metrics", () => {
         { keys: ["https://example.com/c"], clicks: 5, impressions: 90 },
       ] })
     })
-    const result = await loadGoogleGoalMetrics("pages-account", new Headers(), "sc-domain:pages.example.com", null)
+    const result = await loadGoogleGoalMetrics("pages-account", new Headers(), "sc-domain:pages.example.com", null, [], [], { includePages: true })
 
     expect(result.searchPages).toEqual([
       { page: "https://example.com/a", impressions: 1200, clicks: 18, ctr: 1.5, position: 12.3 },
       { page: "https://example.com/b", impressions: 40, clicks: 0, ctr: 0, position: 34.1 },
     ])
     expect(result.errors).toEqual([])
+  })
+
+  it("collects per-query search metrics", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (!String(init?.body ?? "").includes('"dimensions":["query"]')) return jsonResponse({})
+      return jsonResponse({ rows: [
+        { keys: ["seo ツール"], clicks: 12, impressions: 900, ctr: 0.0133, position: 8.4 },
+        { keys: ["順位が無い語"], clicks: 0, impressions: 10 },
+      ] })
+    })
+    const result = await loadGoogleGoalMetrics("queries-account", new Headers(), "sc-domain:queries.example.com", null, [], [], { includeQueries: true })
+
+    expect(result.searchQueries).toHaveLength(1)
+    expect(result.searchQueries[0]).toMatchObject({ query: "seo ツール", impressions: 900, clicks: 12, position: 8.4 })
+    expect(result.searchQueries[0].ctr).toBeCloseTo(1.33)
+    expect(result.errors).toEqual([])
+  })
+
+  it("asks for the page and query dimensions only when the caller needs them", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => jsonResponse({}))
+    const result = await loadGoogleGoalMetrics("no-queries-account", new Headers(), "sc-domain:no-queries.example.com", null)
+
+    expect(result.searchQueries).toEqual([])
+    expect(result.searchPages).toEqual([])
+    expect(fetchMock.mock.calls.some(([, init]) => /"dimensions":\["(query|page)"\]/.test(String(init?.body ?? "")))).toBe(false)
   })
 
   it("does not share a cache entry between complete and truncated keyword requests", async () => {
@@ -82,13 +107,13 @@ describe("Google goal metrics", () => {
 
     expect(complete.errors).toEqual([])
     expect(truncated.errors).toContain("順位を取得できる対象キーワードは先頭20件までです。")
-    expect(fetchMock).toHaveBeenCalledTimes(44)
+    expect(fetchMock).toHaveBeenCalledTimes(42)
   })
 
   it("maps directly measurable goal metrics to their current values", () => {
     const metrics: GoogleGoalMetrics = {
       values: { "organic-sessions": { value: "123セッション" }, "ad-revenue": { value: "456円" } },
-      keywordValues: {}, observations: {}, goalValues: {}, goalObservations: {}, numericObservations: {}, searchPages: [], errors: [], period: "test",
+      keywordValues: {}, observations: {}, goalValues: {}, goalObservations: {}, numericObservations: {}, searchPages: [], searchQueries: [], errors: [], period: "test",
     }
     expect(googleValueForGoal("organicSessions", metrics)?.value).toBe("123セッション")
     expect(googleValueForGoal("adRevenue", metrics)?.value).toBe("456円")
