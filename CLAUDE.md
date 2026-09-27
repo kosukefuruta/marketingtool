@@ -7,11 +7,12 @@
 Owtellは、URLを入力して技術SEO上の問題を診断し、将来的にSEO施策と効果測定を管理するWebサービスです。過去のLPコピー生成構想は採用していません。
 
 - 現行仕様: `docs/seo-audit-v0.1.md`
+- 施策エンジン構想: `docs/goal-driven-action-planning.md`
 - プロダクト計画: `docs/product-plan.md`
 - 有料機能要件: `docs/paid-feature-requirements.md`
 - Phase 1計画: `docs/phase1-auth-site-billing-plan.md`
 - Koyeb設定: `docs/koyeb-deployment-checklist.md`
-- 次回の実機テスト: `docs/next-session-handoff.md`
+- 次回セッション引き継ぎ: `docs/next-session-handoff.md`
 
 ## 技術構成
 
@@ -51,9 +52,9 @@ pnpm db:migrate
 
 ## 次に行うこと
 
-Phase 1の実機テストを行う。順番と記録項目は`docs/next-session-handoff.md`に従う。
+Phase 1（認証・サイト登録・Stripe課金）の実機テストは2026-09-27に完了した。Stripe本番モードでの契約開始のみ未確認である。
 
-実機テストが完了するまでは、Phase 2のSearch Console連携や施策管理へ進まない。
+現在の作業対象は`docs/goal-driven-action-planning.md`の目標駆動型SEO施策エンジンである。到達点と着手候補は`docs/next-session-handoff.md`に従う。
 
 ## 作業上の注意
 

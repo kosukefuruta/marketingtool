@@ -1,93 +1,56 @@
-# 次回セッション引き継ぎ: Phase 1 実機テスト
+# 次回セッション引き継ぎ
 
-最終更新: 2026-09-20
+最終更新: 2026-09-27
 
 ## 現在地
 
-認証・サイト登録・Stripe課金基盤をKoyebへデプロイ済み。
+Phase 1（認証・サイト登録・Stripe課金）の実機テストは完了している。実装の中心は、`docs/goal-driven-action-planning.md`の目標駆動型SEO施策エンジンへ移っている。
 
-確認済み:
+`main`はクリーンで、`pnpm typecheck`と`pnpm test`（19ファイル・107件、1スキップ）が通る。最新コミットは2026-09-22のPR #35。
 
-- `https://tool.owtell.com/health` がHTTP 200
-- `https://tool.owtell.com/ready` がHTTP 200
-- `/pricing` と `/login` がHTTP 200
-- Neonへのマイグレーション成功
-- DockerfileのデフォルトCMDで、マイグレーション後にNext.jsが起動する
-- ローカルの型チェック、24件のテスト、本番ビルド、Docker起動確認が成功
-- Amazon SESの`tool.owtell.com` Identityと送信元`support@tool.owtell.com`を設定済み
-- Stripeテストモードのキー、Price、Webhookを設定済み
+### Phase 1で確認済み
 
-未確認:
+- 本番環境でのメールOTPによる新規登録、ログイン、ログアウト、再ログイン
+- サイト登録とURLのorigin正規化
+- Stripeテストモードでの契約開始と、署名検証済みWebhookによる契約状態の反映
+- Owtellの契約設定画面（`/settings/billing`）での解約予約、解約予約の取り消し、支払方法変更
+- 解約予約後も契約終了日までは有料状態として扱われること
+- 再デプロイ後にユーザー、登録サイト、契約状態が保持されること
 
-- 実メールへのOTP到達
-- OTPによる新規登録、ログイン、ログアウト、再ログイン
-- サイト登録と変更
-- Stripe Checkoutの完了
-- Stripe Webhookによる契約反映
-- 契約設定画面からの支払方法変更と解約予約
-- 再デプロイ後のデータ保持
+Stripe Customer Portalは使わず、契約管理画面はOwtell側で実装している。カード入力のみCheckoutの`setup`モードへ委譲する。
 
-## 実機テストの順番
+### Phase 1完了条件のうち、扱いが変わった項目
 
-### 1. OTP認証
+- **Stripe本番モードでの契約開始**: 未確認。本番キー・Price・Webhookの設定と実際の課金確認が残っている
+- **1ユーザー1サイト**: 仕様変更により無効。`site`テーブルは`unique(user_id, normalized_origin)`で、1ユーザーが複数サイトを登録できる。サイトごとのワークスペース構成へ移行済み
 
-1. `https://tool.owtell.com/login`を開く
-2. 実際に受信できるメールアドレスを入力する
-3. `Owtell <support@tool.owtell.com>`から6桁OTPが届くことを確認する
-4. 10分以内にOTPを入力してログインする
-5. ログアウトし、同じメールアドレスで再ログインする
+### Phase 1後に実装した機能
 
-確認するログ:
+- サイトワークスペース（`/dashboard/sites/[siteId]`）と複数サイト対応
+- Googleログインによる連携と、Search Console・GA4からのデータ取得（`lib/google-data.ts`）
+- サイトごとのGoogleプロパティ選択（`/dashboard/sites/[siteId]/integrations/google`）
+- 指標別の目標登録と、目標のKPI分解シナリオ（`lib/goals.ts`、`lib/goal-breakdowns.ts`）
+- 観測レートのベイズ推定（`lib/bayesian-rate.ts`）
+- GA4キーイベントの段階割り当て（`lib/goal-key-events.ts`）
+- CTAページの手動設定（`lib/goal-cta-pages.ts`、上限20件）
+- GA4セッションによるファネル実績表示と、ページRPMの推定・手動入力（`lib/page-rpm.ts`）
+- 診断結果のページ一覧と詳細の分割、結果サマリー
 
-- Koyebに`[mail] SES send failed`がない
-- Amazon SESで送信、バウンス、苦情に異常がない
+## 次にやること
 
-### 2. サイト登録
+`docs/goal-driven-action-planning.md`§20の設計資料が未着手である。着手順の候補は次のとおり。
 
-1. 公開サイトのURLを登録する
-2. パスやクエリがoriginへ正規化されることを確認する
-3. ダッシュボードとサイト設定に同じサイトが表示されることを確認する
-4. 別URLへ変更し、1ユーザー1サイトの制約が維持されることを確認する
+1. 施策型カタログ（施策ID、対象、操作、適用・除外条件、効果、測定、依存関係）
+2. 状態・シグナル辞書（現在状態の定義、必要データ、判定式、確信度）
+3. カバレッジマトリクス（目標・要因・状態・データ・施策・予測・測定の接続検査）
+4. 実データでの施策インスタンス生成プロトタイプ
 
-### 3. Stripeテスト決済
+並行して残っている運用課題は次のとおり。
 
-1. ダッシュボードから月額プランのCheckoutを開始する
-2. Stripeテストカード`4242 4242 4242 4242`を使用する
-3. 有効期限は将来の日付、CVCは任意の3桁を入力する
-4. Checkout完了直後は「確認中」になり、Webhook反映後だけ有料状態になることを確認する
-5. Stripe Workbenchで対象WebhookがHTTP 200になっていることを確認する
+- Stripe本番モードの設定と契約開始確認
+- `docs/paid-feature-requirements.md`の施策管理・効果測定（施策の状態、実施日、修正前後、メモ、実施前後比較）の実装
 
-対象イベント:
-
-- `checkout.session.completed`
-- `customer.subscription.created`
-- `customer.subscription.updated`
-- `customer.subscription.deleted`
-- `setup_intent.succeeded`（支払方法の変更に必要。Stripeのエンドポイント設定に追加すること）
-
-Webhook URL:
-
-```text
-https://tool.owtell.com/api/webhooks/stripe
-```
-
-### 4. 契約設定画面
-
-1. 契約設定を開き、状態・次回請求日・登録カード・請求履歴が表示されることを確認する
-2. 「期間終了時に解約する」を実行する
-3. Webhook反映後に状態が「解約予定」へ変わり、契約終了日が表示されることを確認する
-4. 解約予約後も有料状態が維持されることを確認する
-5. 「解約予約を取り消す」で状態が「利用中」へ戻ることを確認する
-6. 「支払方法を変更」からStripeのカード登録画面へ遷移し、`4242 4242 4242 4242`で登録できることを確認する
-7. 登録後に表示されるカードの末尾4桁が更新されることを確認する
-
-契約状態はWebhook受信後にのみ変わる。操作直後は「Stripeからの確認を待っています」と表示され、反映され次第自動で更新される。
-
-### 5. 永続化
-
-1. Koyebを再デプロイする
-2. 再ログインできることを確認する
-3. 登録サイトと契約状態が保持されていることを確認する
+DataForSEOの導入は、外部SEOデータAPIとして計画済みだが着手はPhase 2完了後とする。契約前にデータ保存可否の確認が必要である。
 
 ## 問題発生時に保存する情報
 
@@ -100,6 +63,4 @@ https://tool.owtell.com/api/webhooks/stripe
 
 メールアドレス、OTP、カード情報、APIキー、Webhook署名シークレット、DB接続文字列は記録・共有しない。
 
-## 実機テスト後
-
-すべて成功したら、`docs/phase1-auth-site-billing-plan.md`の完了条件と照合する。未達項目をIssueまたは次のPRへ分け、Phase 1完了後にPhase 2（Search Console連携）へ進む。
+メールが届かないときは、必ずKoyebのログで`[mail]`を確認する。Better Authは送信をバックグラウンドタスクで実行するため、送信に失敗しても画面は成功表示になる。

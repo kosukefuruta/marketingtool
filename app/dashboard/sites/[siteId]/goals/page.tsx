@@ -2,6 +2,7 @@ import { and, asc, eq, inArray } from "drizzle-orm"
 import { headers } from "next/headers"
 import { notFound } from "next/navigation"
 import { DeleteGoalForm } from "@/components/delete-goal-form"
+import { GoalEditForm } from "@/components/goal-edit-form"
 import { GoalDriverTree } from "@/components/goal-driver-tree"
 import { GoalCtaPageForm } from "@/components/goal-cta-page-form"
 import { GoalForm } from "@/components/goal-form"
@@ -117,6 +118,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
             <div><dt>{periodLabel}</dt><dd><strong>{metric && goalMetrics[metric].direction === "decrease" ? "≤ " : "≥ "}{metric ? formatGoalValue(metric, item.targetValue) : item.targetValue}</strong></dd></div>
           </dl>
           {currentActual?.detail && <p className="muted">直近28日間: {currentActual.detail}</p>}
+          {metric && <GoalEditForm siteId={siteId} goal={{ id: item.id, metric, subjectValue: item.subjectValue, targetValue: item.targetValue }} siteCategory={siteCategory} />}
           {metric && keyEventStagesForMetric(metric).length > 0 && <GoalKeyEventForm siteId={siteId} goalId={item.id} metric={metric} available={availableKeyEvents} selected={selectedKeyEvents} loadError={keyEventsError} />}
           {metric && keyEventStagesForMetric(metric).length > 0 && <GoalCtaPageForm siteId={siteId} goalId={item.id} siteOrigin={registeredSite.normalizedOrigin} paths={ctaPaths} />}
           {metric === "adRevenue" && <GoalPageRpmForm siteId={siteId} goalId={item.id} legacyPageRpm={item.pageRpm} pageRpmRevenue={item.pageRpmRevenue} pageRpmPageviews={item.pageRpmPageviews} />}
