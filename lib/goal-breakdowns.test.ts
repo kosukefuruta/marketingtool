@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildGoalScenarios, getGoalBreakdown } from "./goal-breakdowns"
+import { assumedDriverValues, buildGoalScenarios, getGoalBreakdown } from "./goal-breakdowns"
 import { isSiteCategory } from "./site-categories"
 
 describe("goal breakdown definitions", () => {
@@ -7,6 +7,11 @@ describe("goal breakdown definitions", () => {
     const breakdown = getGoalBreakdown("conversions")
     expect(breakdown?.formula).toContain("CTAページ到達率 × CTAページCVR")
     expect(breakdown?.drivers.map((driver) => driver.id)).toEqual(["organic-sessions", "cta-sessions", "cta-rate", "conversion-sessions", "cta-cvr"])
+  })
+
+  it("breaks organic sessions down to impressions, CTR and clicks", () => {
+    const organic = getGoalBreakdown("conversions")?.drivers.find((driver) => driver.id === "organic-sessions")
+    expect(organic?.children?.map((child) => child.id)).toEqual(["impressions", "ctr", "organic-clicks"])
   })
 
   it("uses the advertising revenue identity", () => {
@@ -97,6 +102,52 @@ describe("goal breakdown definitions", () => {
     }).find((scenario) => scenario.id === "standard")
     expect(negative?.requirements[0].value).toBe(250000)
     expect(excessiveWeight?.requirements[0].value).toBe(250000)
+  })
+
+  it("assumes the conversion rates Google cannot measure", () => {
+    const assumed = assumedDriverValues("conversions")
+    expect(Object.keys(assumed)).toEqual(["cta-rate", "cta-cvr"])
+    expect(assumed["cta-rate"]).toEqual({ value: "3%", detail: "初期仮定値（慎重 2% 〜 好調 5%）", assumed: true })
+    expect(assumed["cta-cvr"].value).toBe("1%")
+  })
+
+  it("assumes every rate the paid contract funnel needs", () => {
+    const assumed = assumedDriverValues("paidContracts")
+    expect(Object.keys(assumed)).toEqual(["cta-rate", "free-cvr", "paid-rate"])
+    expect(assumed["free-cvr"].value).toBe("5%")
+    expect(assumed["paid-rate"].value).toBe("10%")
+  })
+
+  it("marks an assumed rate as corrected once it is measured", () => {
+    const assumed = assumedDriverValues("conversions", null, { "cta-rate": { successes: 500, trials: 10_000 } })
+    expect(assumed["cta-rate"].detail).toContain("実測で補正した仮定値")
+    expect(Number.parseFloat(assumed["cta-rate"].value)).toBeGreaterThan(4.5)
+  })
+
+  it("assumes the page RPM from the site genre", () => {
+    const assumed = assumedDriverValues("adRevenue", "entertainment")
+    expect(assumed["page-rpm"]).toEqual({ value: "400円/1,000PV", detail: "エンタメの初期仮定値（慎重 200円 〜 好調 700円）", assumed: true })
+  })
+
+  it("reports how much a manual page RPM moved the assumption", () => {
+    const assumed = assumedDriverValues("adRevenue", "entertainment", {}, {}, 1.3, 443)
+    expect(assumed["page-rpm"].value).toBe("383円/1,000PV")
+    expect(assumed["page-rpm"].detail).toContain("手入力・実測補正 4%")
+  })
+
+  it("keeps the assumed value and the standard scenario in step", () => {
+    const observations = { "cta-rate": { successes: 500, trials: 10_000 } }
+    const standard = buildGoalScenarios("conversions", 10, null, observations).find((scenario) => scenario.id === "standard")
+    expect(standard?.assumptions[0].value).toBe(assumedDriverValues("conversions", null, observations)["cta-rate"].value)
+
+    const adStandard = buildGoalScenarios("adRevenue", 100000, "entertainment", {}, { "page-rpm": { value: 800, weight: 0.5 } }).find((scenario) => scenario.id === "standard")
+    const adAssumed = assumedDriverValues("adRevenue", "entertainment", {}, { "page-rpm": { value: 800, weight: 0.5 } })
+    expect(adAssumed["page-rpm"].value).toBe(`${adStandard?.assumptions[0].value}/1,000PV`)
+  })
+
+  it("assumes nothing for a metric without a breakdown or without a genre", () => {
+    expect(assumedDriverValues("averagePosition")).toEqual({})
+    expect(assumedDriverValues("adRevenue", null)).toEqual({})
   })
 
   it("rejects inherited object properties as site categories", () => {

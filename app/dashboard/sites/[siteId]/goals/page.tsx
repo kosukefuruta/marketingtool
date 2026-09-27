@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray } from "drizzle-orm"
 import { headers } from "next/headers"
+import Link from "next/link"
 import { notFound } from "next/navigation"
 import { DeleteGoalForm } from "@/components/delete-goal-form"
 import { GoalEditForm } from "@/components/goal-edit-form"
@@ -13,7 +14,7 @@ import { db } from "@/lib/db"
 import { account, goal, goalCtaPage, goalKeyEvent, site } from "@/lib/db/schema"
 import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent, type GoalAnalyticsConfig } from "@/lib/google-data"
 import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
-import { buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
+import { assumedDriverValues, buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, goalSubjects, isGoalMetric, isGoalPeriod, isGoalSubject } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
 import { isSiteCategory } from "@/lib/site-categories"
@@ -100,6 +101,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
         const observations = { ...actuals?.observations, ...actuals?.goalObservations[item.id] }
         const scenarios = metric ? buildGoalScenarios(metric, item.targetValue, siteCategory, observations, actuals?.numericObservations, item.pageRpmRevenue, item.pageRpmPageviews) : []
         const currentValues = {
+          ...(metric ? assumedDriverValues(metric, siteCategory, observations, actuals?.numericObservations, item.pageRpmRevenue, item.pageRpmPageviews) : {}),
           ...actuals?.values,
           ...actuals?.goalValues[item.id],
           ...(item.pageRpmRevenue === null || item.pageRpmPageviews === null ? {} : { "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue / item.pageRpmPageviews * 1000)}円/1,000PV`, detail: `広告収益 ${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue)}円 / ${new Intl.NumberFormat("ja-JP").format(item.pageRpmPageviews)}PV` } }),
@@ -121,6 +123,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
           {metric && <GoalEditForm siteId={siteId} goal={{ id: item.id, metric, subjectValue: item.subjectValue, targetValue: item.targetValue }} siteCategory={siteCategory} />}
           {metric && keyEventStagesForMetric(metric).length > 0 && <GoalKeyEventForm siteId={siteId} goalId={item.id} metric={metric} available={availableKeyEvents} selected={selectedKeyEvents} loadError={keyEventsError} />}
           {metric && keyEventStagesForMetric(metric).length > 0 && <GoalCtaPageForm siteId={siteId} goalId={item.id} siteOrigin={registeredSite.normalizedOrigin} paths={ctaPaths} />}
+          {metric === "adRevenue" && !siteCategory && <p className="status">サイトジャンルを設定すると、ページRPMの仮定値と達成シナリオを表示します。<Link href={`/dashboard/sites/${siteId}/settings`}>サイトジャンルを設定</Link></p>}
           {metric === "adRevenue" && <GoalPageRpmForm siteId={siteId} goalId={item.id} legacyPageRpm={item.pageRpm} pageRpmRevenue={item.pageRpmRevenue} pageRpmPageviews={item.pageRpmPageviews} />}
           {breakdown ? <div className="stack">
             <div><h4>目標のブレークダウン</h4><p className="goal-formula">{breakdown.formula}</p></div>

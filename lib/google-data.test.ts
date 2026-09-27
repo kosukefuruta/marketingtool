@@ -20,6 +20,8 @@ describe("Google goal metrics", () => {
 
     expect(result.values.impressions).toEqual({ value: "0回" })
     expect(result.values["organic-clicks"]).toEqual({ value: "0クリック" })
+    expect(result.values.ctr).toEqual({ value: "算出不可", detail: "対象期間の検索表示回数が0回のため、CTRを算出できません。" })
+    expect(result.observations.ctr).toBeUndefined()
     expect(result.keywordValues.keyword).toEqual({
       value: "データなし",
       detail: "対象期間に、このキーワードの検索表示データはありません。",
@@ -28,6 +30,15 @@ describe("Google goal metrics", () => {
 
     await loadGoogleGoalMetrics("empty-account", new Headers(), "sc-domain:example.com", null, ["keyword"])
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("reports a measured CTR once impressions exist", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => jsonResponse({ rows: [{ clicks: 18, impressions: 1200, ctr: 0.015, position: 12.3 }] }))
+    const result = await loadGoogleGoalMetrics("ctr-account", new Headers(), "sc-domain:ctr.example.com", null)
+
+    expect(result.values.ctr?.value).toBe("1.5%")
+    expect(result.values.ctr?.detail).toContain("実測 18 / 1,200")
+    expect(result.observations.ctr).toEqual({ successes: 18, trials: 1200 })
   })
 
   it("keeps successful keyword data when the aggregate request fails", async () => {
