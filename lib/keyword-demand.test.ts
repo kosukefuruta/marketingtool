@@ -21,7 +21,7 @@ describe("keyword demand", () => {
     )
     expect(row.volume).toBe(9000)
     // 2,800回/28日 = 3,000回/30日 に換算してから比べる
-    expect(row.impressionShare).toBeCloseTo(33.33, 1)
+    expect(row.impressionRate).toBeCloseTo(33.33, 1)
   })
 
   it("matches a keyword the API returned in a different case", () => {
@@ -37,7 +37,7 @@ describe("keyword demand", () => {
       [query({ query: "a" }), query({ query: "b" })],
       [{ keyword: "a", volume: null, competition: null }, { keyword: "b", volume: 0, competition: null }],
     )
-    expect(rows.every((row) => row.impressionShare === null)).toBe(true)
+    expect(rows.every((row) => row.impressionRate === null)).toBe(true)
   })
 
   it("puts the largest demand first and keeps unknown volumes last", () => {

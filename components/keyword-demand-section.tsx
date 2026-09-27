@@ -13,7 +13,7 @@ export async function KeywordDemandSection({ queries }: { queries: SearchQueryMe
   return <section className="card stack">
     <div>
       <h2>検索需要</h2>
-      <p className="muted">表示回数の多いキーワードに月間検索数を突き合わせています。表示シェアは需要のうち実際に検索結果へ表示された割合の目安で、順位が低いほど小さくなります。国や端末の条件が揃わないため100%を超えることがあります。</p>
+      <p className="muted">表示回数の多いキーワードに月間検索数を突き合わせています。表示率は月間検索数に対する表示回数の割合で、順位が低いほど小さくなります。検索数は過去12か月の平均のため、直近の需要が平均を上回るときは100%を超えます。</p>
     </div>
     {demand.error && <p className="error" role="alert">{demand.error}</p>}
     <KeywordDemandTable rows={demand.rows} />

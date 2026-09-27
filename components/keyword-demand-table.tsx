@@ -10,7 +10,7 @@ export function KeywordDemandTable({ rows }: { rows: KeywordDemand[] }) {
           <th>検索キーワード</th>
           <th>月間検索数</th>
           <th>表示回数</th>
-          <th>表示シェア</th>
+          <th>表示率</th>
           <th>平均順位</th>
         </tr>
       </thead>
@@ -18,7 +18,7 @@ export function KeywordDemandTable({ rows }: { rows: KeywordDemand[] }) {
         <td>{row.query}</td>
         <td>{row.volume === null ? "不明" : `${number.format(row.volume)}回`}</td>
         <td>{number.format(row.impressions)}回</td>
-        <td>{row.impressionShare === null ? "—" : `${number.format(row.impressionShare)}%`}</td>
+        <td>{row.impressionRate === null ? "—" : `${number.format(row.impressionRate)}%`}</td>
         <td>{number.format(row.position)}位</td>
       </tr>)}</tbody>
     </table>
