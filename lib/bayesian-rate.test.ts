@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { priorFromThreePoints, updateRate } from "./bayesian-rate"
+import { priorFromThreePoints, RATE_PRIOR_TRIALS, updateRate } from "./bayesian-rate"
 
 describe("Bayesian rate updates", () => {
   it("reproduces the elicited P15, P50, and P85 points", () => {
@@ -24,6 +24,32 @@ describe("Bayesian rate updates", () => {
     expect(estimate.median).toBeCloseTo(0.05, 2)
     expect(estimate.low).toBeLessThan(estimate.median)
     expect(estimate.high).toBeGreaterThan(estimate.median)
+  })
+
+  it("barely moves the initial distribution on a handful of observations", () => {
+    // 実測6/6（100%）でも、28日の少ない流入の比率は規模が増えた後を代表しない。
+    const prior = priorFromThreePoints(0.02, 0.03, 0.05)
+    const tiny = updateRate(6, 6, prior)!
+    expect(tiny.median).toBeGreaterThan(0.03)
+    expect(tiny.median).toBeLessThan(0.04)
+
+    const none = updateRate(0, 6, prior)!
+    expect(none.median).toBeGreaterThan(0.028)
+    expect(none.median).toBeLessThan(0.03)
+  })
+
+  it("gives the observation more weight as the sample grows", () => {
+    const prior = priorFromThreePoints(0.02, 0.03, 0.05)
+    const medians = [6, RATE_PRIOR_TRIALS, 10 * RATE_PRIOR_TRIALS].map((trials) => updateRate(trials, trials, prior)!.median)
+    expect(medians[0]).toBeLessThan(medians[1])
+    expect(medians[1]).toBeLessThan(medians[2])
+  })
+
+  it("leaves a measured-only rate undamped", () => {
+    // 事前分布を渡さない推定は観測そのものを見るためのもの。弱めない。
+    const estimate = updateRate(2, 160)!
+    expect(estimate.median).toBeGreaterThan(0.008)
+    expect(estimate.median).toBeLessThan(0.02)
   })
 
   it("supports measured-only rates and invalid input", () => {

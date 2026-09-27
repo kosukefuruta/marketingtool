@@ -1,6 +1,14 @@
 export type RatePrior = { low: number; median: number; high: number }
 export type RateEstimate = { median: number; low: number; high: number; observed: number | null; successes: number; trials: number }
 
+/**
+ * 標準値を実測へ寄せきるまでに必要な観測量の目安。
+ * 観測の重みを trials / (trials + この値) とすることで、母数が少ないうちは標準値がほぼ残る。
+ * 計測期間が28日と短く、流入が少ない時期の比率は、規模が増えた後の水準を代表しないため。
+ * ページRPMが PV /(PV + RPM_PRIOR_PAGEVIEWS) で寄せているのと同じ考え方。
+ */
+export const RATE_PRIOR_TRIALS = 100
+
 const GRID_SIZE = 8001
 const LOGIT_LIMIT = 20
 const NORMAL_P15 = -1.036433389
@@ -84,7 +92,11 @@ export function updateRate(successes: number, trials: number, prior?: RatePrior)
       // Jeffreys Beta(1/2, 1/2), converted to mass on an evenly spaced logit grid.
       logPrior = 0.5 * Math.log(probability) + 0.5 * Math.log1p(-probability)
     }
-    const weight = logPrior + successes * Math.log(probability) + (trials - successes) * Math.log1p(-probability)
+    // 標準値を持つ推定だけ、母数に応じて実測の影響を弱める。
+    // 事前分布を渡さない推定（実測CTRの区間など）は観測そのものを見たいので弱めない。
+    const observationWeight = shape ? trials / (trials + RATE_PRIOR_TRIALS) : 1
+    const logLikelihood = successes * Math.log(probability) + (trials - successes) * Math.log1p(-probability)
+    const weight = logPrior + observationWeight * logLikelihood
     logWeights[index] = weight
     if (weight > maximum) maximum = weight
   }
