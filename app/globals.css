@@ -65,6 +65,9 @@ button { cursor: pointer; }
 .goal-progress-track { height: 8px; border-radius: 999px; background: #eaecf0; overflow: hidden; }
 .goal-progress-fill { height: 100%; border-radius: 999px; background: var(--brand); }
 .goal-progress-achieved .goal-progress-fill { background: #12805c; }
+.scenario-picker { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; margin-top: 12px; }
+.scenario-picker strong { padding: 4px 12px; border-radius: 999px; background: var(--brand); color: #fff; }
+.scenario-picker a { padding: 4px 12px; border-radius: 999px; background: #f2f4f7; text-decoration: none; }
 .goal-formula { margin: 0; padding: 14px 16px; border-radius: 10px; background: #eff4ff; color: #1849a9; font-weight: 700; }
 .goal-driver-tree, .goal-driver-tree ul { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .goal-driver-tree ul { margin: 12px 0 0 24px; padding-left: 20px; border-left: 2px solid var(--line); }

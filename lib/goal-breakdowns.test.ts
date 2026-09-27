@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { assumedDriverValues, buildGoalScenarios, driverGapLabel, getGoalBreakdown, measuredDriverAmounts, requiredDriverValues } from "./goal-breakdowns"
+import { assumedDriverValues, buildGoalScenarios, driverGapLabel, getGoalBreakdown, isScenarioId, measuredDriverAmounts, requiredDriverValues } from "./goal-breakdowns"
 import { isSiteCategory } from "./site-categories"
 
 describe("goal breakdown definitions", () => {
@@ -157,18 +157,55 @@ describe("goal breakdown definitions", () => {
     expect(required["organic-sessions"].value).toBe(33334)
   })
 
-  it("leaves the assumed rates out of the required values", () => {
-    // 率は「その水準が続く前提」であって、目標が要求する水準ではない。
-    const conversions = requiredDriverValues("conversions", 10, null, { "cta-rate": { successes: 10, trials: 1000 } })
-    expect(conversions["cta-rate"]).toBeUndefined()
-    expect(conversions["cta-cvr"]).toBeUndefined()
+  it("needs more traffic in the conservative scenario and less in the optimistic one", () => {
+    const conservative = requiredDriverValues("conversions", 10, null, {}, {}, null, null, {}, "conservative")
+    const standard = requiredDriverValues("conversions", 10)
+    const optimistic = requiredDriverValues("conversions", 10, null, {}, {}, null, null, {}, "optimistic")
+    expect(conservative["organic-sessions"].value).toBe(100000)
+    expect(standard["organic-sessions"].value).toBe(33334)
+    expect(optimistic["organic-sessions"].value).toBe(10000)
+  })
 
-    const paid = requiredDriverValues("paidContracts", 10)
-    expect(paid["cta-rate"]).toBeUndefined()
-    expect(paid["free-cvr"]).toBeUndefined()
-    expect(paid["paid-rate"]).toBeUndefined()
+  it("asks to raise the rates only in the optimistic scenario", () => {
+    // baselineは推定中央値。標準では同値になり、差分は出ない。
+    const standard = requiredDriverValues("conversions", 10)
+    expect(standard["cta-rate"].value).toBe(standard["cta-rate"].baseline)
+    expect(driverGapLabel(standard["cta-rate"].value, standard["cta-rate"].baseline, "%")).toBe("達成")
 
-    expect(requiredDriverValues("adRevenue", 100000, "entertainment")["page-rpm"]).toBeUndefined()
+    const optimistic = requiredDriverValues("conversions", 10, null, {}, {}, null, null, {}, "optimistic")
+    expect(optimistic["cta-rate"].value).toBeCloseTo(5)
+    expect(optimistic["cta-rate"].baseline).toBeCloseTo(3)
+    expect(driverGapLabel(optimistic["cta-rate"].value, optimistic["cta-rate"].baseline, "%")).toBe("あと2%")
+  })
+
+  it("keeps a measured rate from inventing a shortfall in the standard scenario", () => {
+    const required = requiredDriverValues("conversions", 10, null, { "cta-rate": { successes: 10, trials: 1000 } })
+    expect(driverGapLabel(required["cta-rate"].value, required["cta-rate"].baseline, "%")).toBe("達成")
+  })
+
+  it("scales the advertising RPM target with the scenario", () => {
+    const optimistic = requiredDriverValues("adRevenue", 100000, "entertainment", {}, {}, null, null, {}, "optimistic")
+    expect(optimistic["page-rpm"].value).toBe(700)
+    expect(optimistic["page-rpm"].baseline).toBe(400)
+    expect(optimistic.pageviews.value).toBe(142858)
+  })
+
+  it("accepts only the three scenario ids", () => {
+    expect(isScenarioId("conservative")).toBe(true)
+    expect(isScenarioId("standard")).toBe(true)
+    expect(isScenarioId("optimistic")).toBe(true)
+    expect(isScenarioId("aggressive")).toBe(false)
+    expect(isScenarioId("constructor")).toBe(false)
+  })
+
+  it("never asks to move a rate in the standard scenario", () => {
+    // 率は標準シナリオでは「その水準が続く前提」。差分を出すと、逆算に使った率と二重に手を打つことになる。
+    const paid = requiredDriverValues("paidContracts", 10, null, { "free-cvr": { successes: 20, trials: 1000 } })
+    for (const id of ["cta-rate", "free-cvr", "paid-rate"]) {
+      expect(driverGapLabel(paid[id].value, paid[id].baseline, "%")).toBe("達成")
+    }
+    const ads = requiredDriverValues("adRevenue", 100000, "entertainment")
+    expect(driverGapLabel(ads["page-rpm"].value, ads["page-rpm"].baseline, "円/1,000PV")).toBe("達成")
   })
 
   it("matches the standard scenario even when measured rates move it", () => {

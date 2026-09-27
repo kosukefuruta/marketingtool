@@ -13,15 +13,23 @@ import { db } from "@/lib/db"
 import { account, goal, goalCtaPage, goalKeyEvent, site } from "@/lib/db/schema"
 import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent, type GoalAnalyticsConfig } from "@/lib/google-data"
 import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
-import { assumedDriverValues, buildGoalScenarios, getGoalBreakdown, measuredDriverAmounts, requiredDriverValues, type DriverValue } from "@/lib/goal-breakdowns"
+import { assumedDriverValues, buildGoalScenarios, getGoalBreakdown, isScenarioId, measuredDriverAmounts, requiredDriverValues, type DriverValue, type ScenarioId } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, isGoalMetric } from "@/lib/goals"
 import { goalPeriodComparison, goalProgress } from "@/lib/goal-progress"
 import { requireSession } from "@/lib/session"
 import { isSiteCategory, siteCategories } from "@/lib/site-categories"
 
-export default async function GoalDetailPage({ params }: { params: Promise<{ siteId: string; goalId: string }> }) {
+const scenarioChoices = [
+  { id: "conservative", label: "慎重", description: "率が現状の下振れで推移する前提。必要な流入が最も多くなる。" },
+  { id: "standard", label: "標準", description: "率が現在の推定水準で推移する前提。" },
+  { id: "optimistic", label: "好調", description: "率を上振れまで改善する前提。必要な流入は減るが、率を上げる施策が要る。" },
+] as const
+
+export default async function GoalDetailPage({ params, searchParams }: { params: Promise<{ siteId: string; goalId: string }>; searchParams: Promise<{ scenario?: string }> }) {
   const current = await requireSession()
   const { siteId, goalId } = await params
+  const requestedScenario = (await searchParams).scenario ?? ""
+  const scenario: ScenarioId = isScenarioId(requestedScenario) ? requestedScenario : "standard"
   const [[item], [registeredSite], [googleAccount], savedKeyEvents, savedCtaPages] = await Promise.all([
     db.select().from(goal).where(and(eq(goal.id, goalId), eq(goal.siteId, siteId), eq(goal.userId, current.user.id))).limit(1),
     db.select().from(site).where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1),
@@ -85,7 +93,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
   const comparison = goalPeriodComparison(item.period)
   // 実測はGoogleの直近28日分なので、最終目標と同じ期間の判定に従う。
   const requirements = comparison.comparable
-    ? requiredDriverValues(item.metric, item.targetValue, category, observations, actuals?.numericObservations, item.pageRpmRevenue, item.pageRpmPageviews, measuredAmounts)
+    ? requiredDriverValues(item.metric, item.targetValue, category, observations, actuals?.numericObservations, item.pageRpmRevenue, item.pageRpmPageviews, measuredAmounts, scenario)
     : {}
   const progress = comparison.comparable ? goalProgress(item.metric, currentActual?.amount, item.targetValue) : null
   const phase = actuals?.goalObservations[item.id] && Object.keys(actuals.goalObservations[item.id]).length > 0 ? "実測補正中" : breakdown?.phase ?? "未定義"
@@ -109,6 +117,13 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
     </section>
     {breakdown ? <section className="card stack">
       <div><h2>目標のブレークダウン</h2><p className="goal-formula">{breakdown.formula}</p>
+        <div className="scenario-picker">
+          <span className="muted">目指す状態</span>
+          {scenarioChoices.map((choice) => choice.id === scenario
+            ? <strong key={choice.id}>{choice.label}</strong>
+            : <Link href={`/dashboard/sites/${siteId}/goals/${goalId}?scenario=${choice.id}`} key={choice.id}>{choice.label}</Link>)}
+        </div>
+        <p className="muted">{scenarioChoices.find((choice) => choice.id === scenario)?.description}</p>
         {comparison.comparable
           ? comparison.note && <p className="muted">必要値との差分も{comparison.note}</p>
           : <p className="muted">{comparison.reason}必要値との差分は表示していません。</p>}

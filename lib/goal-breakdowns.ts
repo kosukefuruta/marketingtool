@@ -186,7 +186,15 @@ export function assumedDriverValues(metric: GoalMetric, category?: SiteCategory 
   return {}
 }
 
-export type DriverTarget = { value: number; note?: string }
+export type DriverTarget = { value: number; note?: string; baseline?: number }
+
+export type ScenarioId = GoalScenario["id"]
+
+const scenarioIndexes: Record<ScenarioId, 0 | 1 | 2> = { conservative: 0, standard: 1, optimistic: 2 }
+
+export function isScenarioId(value: string): value is ScenarioId {
+  return Object.hasOwn(scenarioIndexes, value)
+}
 
 const amountFormat = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 })
 
@@ -195,7 +203,11 @@ export function formatDriverAmount(value: number, unit: string): string {
 }
 
 /** 目標達成に必要な水準。標準シナリオの前提を使い、実測が入っていればその値で補正する。 */
-export function requiredDriverValues(metric: GoalMetric, target: number, category?: SiteCategory | null, observations: Record<string, RateObservation> = {}, numericObservations: Record<string, NumericObservation> = {}, manualPageRpmRevenue?: number | null, manualPageRpmPageviews?: number | null, currentAmounts: Record<string, number> = {}): Record<string, DriverTarget> {
+export function requiredDriverValues(metric: GoalMetric, target: number, category?: SiteCategory | null, observations: Record<string, RateObservation> = {}, numericObservations: Record<string, NumericObservation> = {}, manualPageRpmRevenue?: number | null, manualPageRpmPageviews?: number | null, currentAmounts: Record<string, number> = {}, scenario: ScenarioId = "standard"): Record<string, DriverTarget> {
+  const index = scenarioIndexes[scenario]
+  // 率の差分は実測の生値ではなく、推定中央値（=標準シナリオの前提）との差で見る。
+  // 観測量が少ないほど生値は揺れるため、揺れを「不足」として出さない。
+  const rateTarget = (band: [number, number, number]): DriverTarget => ({ value: band[index] * 100, baseline: band[1] * 100 })
   // 検索側は「クリック数は自然検索セッション数と同水準」「CTRは現状維持」を前提に逆算する。
   const searchTargets = (requiredSessions: number): Record<string, DriverTarget> => {
     const ctr = currentAmounts.ctr
@@ -210,35 +222,44 @@ export function requiredDriverValues(metric: GoalMetric, target: number, categor
   // 率とRPMは「その水準が続く前提」で volume を逆算するための仮定であって、
   // 目標が要求する水準ではない。必要値として出すと、実際には求めていない差分を作ってしまう。
   if (metric === "conversions") {
-    const ctaRate = updatedRates(ctaRatePrior, observations["cta-rate"])[1]
-    const cvr = updatedRates(ctaCvrPrior, observations["cta-cvr"])[1]
+    const ctaRates = updatedRates(ctaRatePrior, observations["cta-rate"])
+    const cvrs = updatedRates(ctaCvrPrior, observations["cta-cvr"])
+    const ctaRate = ctaRates[index]; const cvr = cvrs[index]
     const organic = target / cvr / ctaRate
     return {
       "conversion-sessions": { value: target },
       "cta-sessions": { value: Math.ceil(target / cvr) },
       "organic-sessions": { value: Math.ceil(organic) },
+      "cta-rate": rateTarget(ctaRates),
+      "cta-cvr": rateTarget(cvrs),
       ...searchTargets(organic),
     }
   }
   if (metric === "paidContracts") {
-    const ctaRate = updatedRates(ctaRatePrior, observations["cta-rate"])[1]
-    const freeCvr = updatedRates(freeCvrPrior, observations["free-cvr"])[1]
-    const paidRate = updatedRates(paidRatePrior, observations["paid-rate"])[1]
+    const ctaRates = updatedRates(ctaRatePrior, observations["cta-rate"])
+    const freeCvrs = updatedRates(freeCvrPrior, observations["free-cvr"])
+    const paidRates = updatedRates(paidRatePrior, observations["paid-rate"])
+    const ctaRate = ctaRates[index]; const freeCvr = freeCvrs[index]; const paidRate = paidRates[index]
     const organic = target / paidRate / freeCvr / ctaRate
     return {
       "paid-conversion-sessions": { value: target },
       "free-conversion-sessions": { value: Math.ceil(target / paidRate) },
       "cta-sessions": { value: Math.ceil(target / paidRate / freeCvr) },
       "organic-sessions": { value: Math.ceil(organic) },
+      "cta-rate": rateTarget(ctaRates),
+      "free-cvr": rateTarget(freeCvrs),
+      "paid-rate": rateTarget(paidRates),
       ...searchTargets(organic),
     }
   }
   if (metric === "adRevenue" && category) {
-    const rpm = pageRpmBand(category, numericObservations, manualPageRpmRevenue, manualPageRpmPageviews).values[1]
+    const band = pageRpmBand(category, numericObservations, manualPageRpmRevenue, manualPageRpmPageviews).values
+    const rpm = band[index]
     const pageviews = target / rpm * 1000
     const viewsPerSession = currentAmounts["pages-per-session"]
     return {
       pageviews: { value: Math.ceil(pageviews) },
+      "page-rpm": { value: rpm, baseline: band[1] },
       ...(viewsPerSession !== undefined && viewsPerSession > 0
         ? { sessions: { value: Math.ceil(pageviews / viewsPerSession), note: `現在のセッションあたり${amountFormat.format(viewsPerSession)}PVを維持した場合` } }
         : {}),
