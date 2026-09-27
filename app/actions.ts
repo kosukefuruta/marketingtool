@@ -1,6 +1,6 @@
 "use server"
 
-import { and, count, eq, inArray, isNull, sql } from "drizzle-orm"
+import { and, count, eq, inArray, isNull, notInArray, sql } from "drizzle-orm"
 import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
@@ -9,12 +9,13 @@ import { account, auditJob, goal, goalCtaPage, goalKeyEvent, site, subscription,
 import { parseCtaPagePaths } from "@/lib/goal-cta-pages"
 import { loadGoogleProperties } from "@/lib/google-data"
 import { goalKeyEventStages, isValidGoogleEventName, keyEventFieldName, keyEventStagesForMetric, manualKeyEventFieldName, type GoalKeyEventStage } from "@/lib/goal-key-events"
-import { parsePageRpmObservation } from "@/lib/page-rpm"
+import { goalMetricChange } from "@/lib/goal-updates"
+import { parsePageRpmObservation, type PageRpmObservation } from "@/lib/page-rpm"
 import { searchConsoleSiteMatches } from "@/lib/google-property-match"
-import { goalMetrics, goalNameFor, goalSubjectForMetric, isGoalMetric, validateGoalValues } from "@/lib/goals"
+import { goalMetrics, goalNameFor, goalSubjectForMetric, isGoalMetric, validateGoalValues, type GoalMetric, type GoalSubject } from "@/lib/goals"
 import { requireSession } from "@/lib/session"
 import { defaultSiteName, normalizePublicSiteUrl } from "@/lib/sites"
-import { isSiteCategory } from "@/lib/site-categories"
+import { isSiteCategory, type SiteCategory } from "@/lib/site-categories"
 import { getStripe } from "@/lib/stripe"
 import { blocksNewCheckout } from "@/lib/subscription-access"
 
@@ -74,6 +75,7 @@ export async function saveSite(_state: SiteFormState, formData: FormData): Promi
 }
 
 export type GoalFormState = { error?: string }
+export type GoalEditFormState = { error?: string; success?: string }
 export type GoalKeyEventFormState = { error?: string; success?: string }
 export type GoalPageRpmFormState = { error?: string; success?: string }
 export type GoalCtaPageFormState = { error?: string; success?: string }
@@ -153,8 +155,17 @@ export async function saveGoogleProperties(_state: GooglePropertiesFormState, fo
     : "使用するGoogleプロパティを保存しました。" }
 }
 
-export async function createGoal(_state: GoalFormState, formData: FormData): Promise<GoalFormState> {
-  const current = await requireSession()
+type ParsedGoalFields = {
+  siteId: string
+  metric: GoalMetric
+  subjectType: GoalSubject
+  subjectValue: string | null
+  targetValue: number
+  category: SiteCategory | null
+  pageRpm: PageRpmObservation | null
+}
+
+function parseGoalFields(formData: FormData): { value: ParsedGoalFields | null; error: string | null } {
   const siteId = String(formData.get("siteId") ?? "").trim()
   const subjectValue = String(formData.get("subjectValue") ?? "").trim()
   const metric = String(formData.get("metric") ?? "")
@@ -163,19 +174,38 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
   const pageRpmRevenueRaw = String(formData.get("pageRpmRevenue") ?? "").trim()
   const pageRpmPageviewsRaw = String(formData.get("pageRpmPageviews") ?? "").trim()
 
-  if (!siteId || !isGoalMetric(metric) || !targetRaw) {
-    return { error: "指標と目標値を入力してください。" }
-  }
-  const keyEvents = metric === "conversions" || metric === "paidContracts" ? selectedKeyEvents(formData, metric) : []
+  if (!siteId || !isGoalMetric(metric) || !targetRaw) return { value: null, error: "指標と目標値を入力してください。" }
   const subjectType = goalSubjectForMetric(metric)
-  if (subjectType === "keyword" && !subjectValue) return { error: "キーワードを入力してください。" }
-  if (metric === "adRevenue" && !isSiteCategory(category)) return { error: "サイトジャンルを選択してください。" }
-  if (subjectValue.length > 200) return { error: "キーワードは200文字以内で入力してください。" }
+  if (subjectType === "keyword" && !subjectValue) return { value: null, error: "キーワードを入力してください。" }
+  if (metric === "adRevenue" && !isSiteCategory(category)) return { value: null, error: "サイトジャンルを選択してください。" }
+  if (subjectValue.length > 200) return { value: null, error: "キーワードは200文字以内で入力してください。" }
   const targetValue = Number(targetRaw)
-  const pageRpmObservation = parsePageRpmObservation(pageRpmRevenueRaw, pageRpmPageviewsRaw)
   const valueError = validateGoalValues(metric, null, targetValue)
-  if (valueError) return { error: valueError }
-  if (metric === "adRevenue" && pageRpmObservation.error) return { error: pageRpmObservation.error }
+  if (valueError) return { value: null, error: valueError }
+  const pageRpmObservation = parsePageRpmObservation(pageRpmRevenueRaw, pageRpmPageviewsRaw)
+  if (metric === "adRevenue" && pageRpmObservation.error) return { value: null, error: pageRpmObservation.error }
+
+  return {
+    value: {
+      siteId,
+      metric,
+      subjectType,
+      subjectValue: subjectType === "keyword" ? subjectValue : null,
+      targetValue,
+      category: metric === "adRevenue" && isSiteCategory(category) ? category : null,
+      pageRpm: metric === "adRevenue" ? pageRpmObservation.value : null,
+    },
+    error: null,
+  }
+}
+
+export async function createGoal(_state: GoalFormState, formData: FormData): Promise<GoalFormState> {
+  const current = await requireSession()
+  const parsed = parseGoalFields(formData)
+  if (!parsed.value) return { error: parsed.error ?? "目標を登録できませんでした。" }
+  const { siteId, metric, subjectType, subjectValue: normalizedSubjectValue, targetValue, category, pageRpm } = parsed.value
+
+  const keyEvents = metric === "conversions" || metric === "paidContracts" ? selectedKeyEvents(formData, metric) : []
   const keyEventError = validateKeyEvents(keyEvents)
   if (keyEventError) return { error: keyEventError }
 
@@ -183,12 +213,10 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
     .where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1)
   if (!ownedSite) return { error: "登録サイトが見つかりません。" }
 
-  const normalizedSubjectValue = subjectType === "keyword" ? subjectValue : null
-
   const now = new Date()
   const goalId = crypto.randomUUID()
   await db.transaction(async (tx) => {
-    if (metric === "adRevenue" && isSiteCategory(category)) {
+    if (category) {
       await tx.update(site).set({ category, updatedAt: now }).where(and(eq(site.id, siteId), eq(site.userId, current.user.id)))
     }
     await tx.insert(goal).values({
@@ -202,8 +230,8 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
       baselineValue: null,
       targetValue,
       pageRpm: null,
-      pageRpmRevenue: metric === "adRevenue" ? pageRpmObservation.value?.revenue ?? null : null,
-      pageRpmPageviews: metric === "adRevenue" ? pageRpmObservation.value?.pageviews ?? null : null,
+      pageRpmRevenue: pageRpm?.revenue ?? null,
+      pageRpmPageviews: pageRpm?.pageviews ?? null,
       period: goalMetrics[metric].defaultPeriod,
       createdAt: now,
       updatedAt: now,
@@ -213,6 +241,52 @@ export async function createGoal(_state: GoalFormState, formData: FormData): Pro
     }
   })
   redirect(`/dashboard/sites/${siteId}/goals#goal-${goalId}`)
+}
+
+export async function updateGoal(_state: GoalEditFormState, formData: FormData): Promise<GoalEditFormState> {
+  const current = await requireSession()
+  const goalId = String(formData.get("goalId") ?? "").trim()
+  const parsed = parseGoalFields(formData)
+  if (!goalId) return { error: "目標が見つかりません。" }
+  if (!parsed.value) return { error: parsed.error ?? "目標を変更できませんでした。" }
+  const { siteId, metric, subjectType, subjectValue, targetValue, category, pageRpm } = parsed.value
+
+  const [existing] = await db.select({ metric: goal.metric }).from(goal)
+    .innerJoin(site, eq(site.id, goal.siteId))
+    .where(and(eq(goal.id, goalId), eq(goal.siteId, siteId), eq(goal.userId, current.user.id), eq(site.userId, current.user.id))).limit(1)
+  if (!existing || !isGoalMetric(existing.metric)) return { error: "目標が見つかりません。" }
+
+  const change = goalMetricChange(existing.metric, metric)
+  const nextStages = keyEventStagesForMetric(metric)
+  const now = new Date()
+  await db.transaction(async (tx) => {
+    if (category) {
+      await tx.update(site).set({ category, updatedAt: now }).where(and(eq(site.id, siteId), eq(site.userId, current.user.id)))
+    }
+    await tx.update(goal).set({
+      name: goalNameFor(metric, targetValue, subjectValue),
+      subjectType,
+      subjectValue,
+      metric,
+      targetValue,
+      period: goalMetrics[metric].defaultPeriod,
+      ...(change.removesPageRpm ? { pageRpm: null, pageRpmRevenue: null, pageRpmPageviews: null } : {}),
+      ...(pageRpm ? { pageRpm: null, pageRpmRevenue: pageRpm.revenue, pageRpmPageviews: pageRpm.pageviews } : {}),
+      updatedAt: now,
+    }).where(and(eq(goal.id, goalId), eq(goal.userId, current.user.id)))
+    if (change.removesKeyEvents) {
+      await tx.delete(goalKeyEvent).where(nextStages.length > 0
+        ? and(eq(goalKeyEvent.goalId, goalId), notInArray(goalKeyEvent.stage, nextStages))
+        : eq(goalKeyEvent.goalId, goalId))
+    }
+    if (change.removesCtaPages) {
+      await tx.delete(goalCtaPage).where(eq(goalCtaPage.goalId, goalId))
+    }
+  })
+
+  revalidatePath(`/dashboard/sites/${siteId}/goals`)
+  revalidatePath(`/dashboard/sites/${siteId}/goals/${goalId}`)
+  return { success: "目標を変更しました。" }
 }
 
 export async function saveGoalPageRpm(_state: GoalPageRpmFormState, formData: FormData): Promise<GoalPageRpmFormState> {

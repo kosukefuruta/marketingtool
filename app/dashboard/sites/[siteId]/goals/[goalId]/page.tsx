@@ -3,6 +3,7 @@ import { headers } from "next/headers"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { GoalDriverTree } from "@/components/goal-driver-tree"
+import { GoalEditForm } from "@/components/goal-edit-form"
 import { GoalCtaPageForm } from "@/components/goal-cta-page-form"
 import { GoalKeyEventForm } from "@/components/goal-key-event-form"
 import { GoalPageRpmForm } from "@/components/goal-page-rpm-form"
@@ -89,6 +90,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
         <div><span>現在値</span><strong>{currentActual?.value ?? (item.baselineValue === null ? "未取得" : formatGoalValue(item.metric, item.baselineValue))}</strong></div>
       </div>
       {currentActual?.detail && <p className="muted">直近28日間: {currentActual.detail}</p>}
+      <GoalEditForm siteId={siteId} goal={{ id: item.id, metric: item.metric, subjectValue: item.subjectValue, targetValue: item.targetValue }} siteCategory={category} />
       {keyEventStagesForMetric(item.metric).length > 0 && <GoalKeyEventForm siteId={siteId} goalId={item.id} metric={item.metric} available={availableKeyEvents} selected={groupGoalKeyEvents(savedKeyEvents)} loadError={keyEventsError} />}
       {keyEventStagesForMetric(item.metric).length > 0 && <GoalCtaPageForm siteId={siteId} goalId={item.id} siteOrigin={registeredSite.normalizedOrigin} paths={savedCtaPages.map((entry) => entry.path)} />}
       {item.metric === "adRevenue" && <GoalPageRpmForm siteId={siteId} goalId={item.id} legacyPageRpm={item.pageRpm} pageRpmRevenue={item.pageRpmRevenue} pageRpmPageviews={item.pageRpmPageviews} />}
