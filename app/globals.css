@@ -59,6 +59,7 @@ button { cursor: pointer; }
 .goal-inline-editor-content { margin-top: 12px; }
 .goal-card { display: grid; gap: 16px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; }
 .goal-card h3, .goal-card p { margin: 0; }
+.goal-card-heading { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
 .goal-progress { display: grid; gap: 6px; }
 .goal-progress-heading { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: baseline; }
 .goal-progress-heading strong { font-size: 18px; }
