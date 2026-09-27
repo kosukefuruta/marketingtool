@@ -5,7 +5,7 @@
  * 当面は結果をDBへ保存せず、プロセス内のキャッシュだけに置く。
  */
 const BASE_URL = process.env.DATAFORSEO_BASE_URL ?? "https://api.dataforseo.com"
-const REQUEST_TIMEOUT_MS = 20_000
+const REQUEST_TIMEOUT_MS = 10_000
 const TASK_SUCCESS = 20000
 /** 日本・日本語。docs/dataforseo-research.md §7 */
 export const JAPAN_LOCATION_CODE = 2392
@@ -15,6 +15,10 @@ export const SEARCH_VOLUME_BATCH_SIZE = 1000
 const VOLUME_CACHE_MS = 7 * 24 * 60 * 60 * 1000
 
 export class DataForSeoError extends Error {}
+
+export function hasDataForSeoCredentials(): boolean {
+  return Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD)
+}
 
 // loginはアカウントのメールアドレス、passwordはAPI Accessタブの専用値（管理画面のログインパスワードとは別）。
 function credentials(): string {
@@ -59,8 +63,12 @@ type SearchVolumeRow = { keyword?: string; search_volume?: number | null; compet
 
 const volumeCache = new Map<string, { expiresAt: number; value: SearchVolume }>()
 
+/**
+ * DataForSEOはキーワードを小文字へ正規化して返すため、要求した綴りと返ってきた綴りが一致しない。
+ * 同じ鍵で読み書きしないとキャッシュが当たらず、開くたびに課金対象のリクエストが飛ぶ。
+ */
 function cacheKey(keyword: string, locationCode: number, languageCode: string): string {
-  return `${locationCode}\n${languageCode}\n${keyword}`
+  return `${locationCode}\n${languageCode}\n${keyword.trim().toLowerCase()}`
 }
 
 /**
@@ -96,6 +104,7 @@ export async function fetchSearchVolumes(
       location_code: locationCode,
       language_code: languageCode,
     }])
+    const returned = new Set<string>()
     for (const row of rows) {
       if (!row.keyword) continue
       const value: SearchVolume = {
@@ -103,7 +112,16 @@ export async function fetchSearchVolumes(
         volume: typeof row.search_volume === "number" ? row.search_volume : null,
         competition: typeof row.competition_index === "number" ? row.competition_index : null,
       }
+      returned.add(cacheKey(row.keyword, locationCode, languageCode))
       volumeCache.set(cacheKey(row.keyword, locationCode, languageCode), { expiresAt: now + VOLUME_CACHE_MS, value })
+      fetched.push(value)
+    }
+    // 行が返らなかったキーワードも記録する。記録しないと、毎回同じ問い合わせを繰り返す。
+    for (const keyword of batch) {
+      const key = cacheKey(keyword, locationCode, languageCode)
+      if (returned.has(key)) continue
+      const value: SearchVolume = { keyword, volume: null, competition: null }
+      volumeCache.set(key, { expiresAt: now + VOLUME_CACHE_MS, value })
       fetched.push(value)
     }
   }

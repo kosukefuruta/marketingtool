@@ -39,6 +39,8 @@ export type GoogleGoalValue = { value: string; detail?: string; amount?: number 
 export type NumericObservation = { value: number; weight: number }
 /** Search Consoleのページ別実績。ページ単位の判定に使う。 */
 export type SearchPageMetric = { page: string; impressions: number; clicks: number; ctr: number; position: number }
+/** Search Consoleのクエリ別実績。検索需要の種になる。 */
+export type SearchQueryMetric = { query: string; impressions: number; clicks: number; ctr: number; position: number }
 export type GoalAnalyticsConfig = {
   goalId: string
   metric: "conversions" | "paidContracts"
@@ -55,6 +57,7 @@ export type GoogleGoalMetrics = {
   goalObservations: Record<string, Record<string, RateObservation>>
   numericObservations: Record<string, NumericObservation>
   searchPages: SearchPageMetric[]
+  searchQueries: SearchQueryMetric[]
   errors: string[]
   period: string
 }
@@ -64,6 +67,7 @@ const PARTIAL_GOAL_METRICS_CACHE_MS = 60 * 1000
 const GOAL_METRICS_CACHE_MAX_ENTRIES = 200
 const KEYWORD_REQUEST_CONCURRENCY = 4
 const SEARCH_PAGE_ROW_LIMIT = 1000
+const SEARCH_QUERY_ROW_LIMIT = 200
 const GOAL_REQUEST_CONCURRENCY = 3
 const GOAL_ANALYTICS_CONFIG_LIMIT = 10
 const keyEventsCache = new Map<string, { expiresAt: number; data: AnalyticsKeyEvent[] }>()
@@ -114,7 +118,7 @@ function metricNumber(report: { rows?: Array<{ metricValues?: Array<{ value?: st
   return Number.isFinite(value) ? value : null
 }
 
-export async function loadGoogleGoalMetrics(providerAccountId: string, requestHeaders: Headers, searchConsoleProperty: string | null, ga4Property: string | null, targetKeywords: string[] = [], goalConfigs: GoalAnalyticsConfig[] = []): Promise<GoogleGoalMetrics> {
+export async function loadGoogleGoalMetrics(providerAccountId: string, requestHeaders: Headers, searchConsoleProperty: string | null, ga4Property: string | null, targetKeywords: string[] = [], goalConfigs: GoalAnalyticsConfig[] = [], { includeQueries = false, includePages = false } = {}): Promise<GoogleGoalMetrics> {
   const uniqueKeywords = [...new Set(targetKeywords.map((keyword) => keyword.trim()).filter(Boolean))]
   const keywords = uniqueKeywords.slice(0, 20)
   const keywordLimitState = uniqueKeywords.length > 20 ? "truncated" : "complete"
@@ -127,7 +131,7 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
   }))
   const normalizedGoalConfigs = allNormalizedGoalConfigs.slice(0, GOAL_ANALYTICS_CONFIG_LIMIT)
   const goalConfigLimitState = allNormalizedGoalConfigs.length > GOAL_ANALYTICS_CONFIG_LIMIT ? "truncated" : "complete"
-  const cacheKey = `${providerAccountId}\n${searchConsoleProperty ?? ""}\n${ga4Property ?? ""}\n${keywordLimitState}\n${keywords.sort().join("\n")}\n${goalConfigLimitState}\n${JSON.stringify(normalizedGoalConfigs)}`
+  const cacheKey = `${providerAccountId}\n${searchConsoleProperty ?? ""}\n${ga4Property ?? ""}\n${keywordLimitState}\n${keywords.sort().join("\n")}\n${goalConfigLimitState}\n${JSON.stringify(normalizedGoalConfigs)}\n${includeQueries}\n${includePages}`
   const cached = readGoalMetricsCache(cacheKey)
   if (cached) return cached
   const token = await auth.api.getAccessToken({ body: { providerId: "google", accountId: providerAccountId }, headers: requestHeaders })
@@ -141,6 +145,7 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
   const goalObservations: Record<string, Record<string, RateObservation>> = {}
   const numericObservations: Record<string, NumericObservation> = {}
   let searchPages: SearchPageMetric[] = []
+  let searchQueries: SearchQueryMetric[] = []
   const errors: string[] = []
   let hasApiError = false
   let organicSessions: number | null = null
@@ -169,7 +174,8 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
       values.ctr = { value: "算出不可", detail: "対象期間の検索表示回数が0回のため、CTRを算出できません。" }
     }
   }).catch((error) => { hasApiError = true; errors.push(`Search Console: ${errorMessage(error)}`) }))
-  if (searchConsoleProperty) tasks.push(googleJson<{ rows?: Array<{ keys?: string[]; clicks?: number; impressions?: number; ctr?: number; position?: number }> }>(
+  // ページ次元も施策候補の画面でしか使わない。
+  if (searchConsoleProperty && includePages) tasks.push(googleJson<{ rows?: Array<{ keys?: string[]; clicks?: number; impressions?: number; ctr?: number; position?: number }> }>(
     `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(searchConsoleProperty)}/searchAnalytics/query`, token.accessToken,
     { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
       startDate, endDate, dimensions: ["page"], rowLimit: SEARCH_PAGE_ROW_LIMIT,
@@ -187,6 +193,25 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
       }]
     })
   }).catch((error) => { hasApiError = true; errors.push(`Search Console（ページ別）: ${errorMessage(error)}`) }))
+  // クエリ次元は検索需要の画面でしか使わない。必要な画面からだけ要求する。
+  if (searchConsoleProperty && includeQueries) tasks.push(googleJson<{ rows?: Array<{ keys?: string[]; clicks?: number; impressions?: number; ctr?: number; position?: number }> }>(
+    `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(searchConsoleProperty)}/searchAnalytics/query`, token.accessToken,
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+      startDate, endDate, dimensions: ["query"], rowLimit: SEARCH_QUERY_ROW_LIMIT,
+    }) },
+  ).then((report) => {
+    searchQueries = (report.rows ?? []).flatMap((row) => {
+      const query = row.keys?.[0]
+      if (!query || row.position === undefined) return []
+      return [{
+        query,
+        impressions: row.impressions ?? 0,
+        clicks: row.clicks ?? 0,
+        ctr: (row.ctr ?? 0) * 100,
+        position: row.position,
+      }]
+    })
+  }).catch((error) => { hasApiError = true; errors.push(`Search Console（クエリ別）: ${errorMessage(error)}`) }))
   if (searchConsoleProperty) tasks.push(runWithConcurrency(keywords, KEYWORD_REQUEST_CONCURRENCY, async (keyword) => {
     try {
       const report = await googleJson<{ rows?: Array<{ clicks?: number; impressions?: number; ctr?: number; position?: number }> }>(
@@ -336,7 +361,7 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
   else await Promise.all(tasks)
   if (uniqueKeywords.length > 20) errors.push("順位を取得できる対象キーワードは先頭20件までです。")
   if (allNormalizedGoalConfigs.length > GOAL_ANALYTICS_CONFIG_LIMIT) errors.push(`GA4の目標別計測は先頭${GOAL_ANALYTICS_CONFIG_LIMIT}件まで取得します。`)
-  const result = { values, keywordValues, observations, goalValues, goalObservations, numericObservations, searchPages, errors: [...new Set(errors)], period: `${startDate}〜${endDate}` }
+  const result = { values, keywordValues, observations, goalValues, goalObservations, numericObservations, searchPages, searchQueries, errors: [...new Set(errors)], period: `${startDate}〜${endDate}` }
   writeGoalMetricsCache(cacheKey, result, hasApiError ? PARTIAL_GOAL_METRICS_CACHE_MS : GOAL_METRICS_CACHE_MS)
   return result
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { clearSearchVolumeCache, DataForSeoError, fetchSearchVolumes, SEARCH_VOLUME_BATCH_SIZE } from "./dataforseo"
+import { clearSearchVolumeCache, DataForSeoError, fetchSearchVolumes, hasDataForSeoCredentials, SEARCH_VOLUME_BATCH_SIZE } from "./dataforseo"
 
 function jsonResponse(body: object, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
@@ -51,6 +51,29 @@ describe("DataForSEO search volumes", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it("caches by the normalized keyword so a different case still hits", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => volumeResponse([
+      { keyword: "seo ツール", search_volume: 1900 },
+    ]))
+
+    await fetchSearchVolumes(["SEO ツール"])
+    const second = await fetchSearchVolumes(["SEO ツール"])
+
+    expect(second[0].volume).toBe(1900)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("remembers the keywords the API returned nothing for", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => volumeResponse([]))
+
+    const first = await fetchSearchVolumes(["誰も検索しない語"])
+    const second = await fetchSearchVolumes(["誰も検索しない語"])
+
+    expect(first).toEqual([{ keyword: "誰も検索しない語", volume: null, competition: null }])
+    expect(second).toEqual(first)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it("splits the keywords into batches the API accepts", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => volumeResponse([]))
     await fetchSearchVolumes(Array.from({ length: SEARCH_VOLUME_BATCH_SIZE + 1 }, (_, index) => `keyword-${index}`))
@@ -79,6 +102,12 @@ describe("DataForSEO search volumes", () => {
   it("reports an HTTP failure", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => jsonResponse({}, 401))
     await expect(fetchSearchVolumes(["seo"])).rejects.toThrow("401")
+  })
+
+  it("reports whether the credentials are configured", () => {
+    expect(hasDataForSeoCredentials()).toBe(true)
+    delete process.env.DATAFORSEO_PASSWORD
+    expect(hasDataForSeoCredentials()).toBe(false)
   })
 
   it("refuses to call without credentials", async () => {

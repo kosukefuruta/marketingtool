@@ -1,9 +1,11 @@
 import { and, asc, eq } from "drizzle-orm"
+import { Suspense } from "react"
 import { headers } from "next/headers"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { ActionCandidates } from "@/components/action-candidates"
 import { GoalDriverTree } from "@/components/goal-driver-tree"
+import { KeywordDemandFallback, KeywordDemandSection } from "@/components/keyword-demand-section"
 import { GoalEditForm } from "@/components/goal-edit-form"
 import { GoalCtaPageForm } from "@/components/goal-cta-page-form"
 import { GoalKeyEventForm } from "@/components/goal-key-event-form"
@@ -11,12 +13,14 @@ import { GoalPageRpmForm } from "@/components/goal-page-rpm-form"
 import { GoalProgressBar } from "@/components/goal-progress-bar"
 import { GoalScenarios } from "@/components/goal-scenarios"
 import { db } from "@/lib/db"
-import { account, goal, goalCtaPage, goalKeyEvent, site } from "@/lib/db/schema"
+import { account, goal, goalCtaPage, goalKeyEvent, site, subscription } from "@/lib/db/schema"
+import { hasPaidAccess } from "@/lib/subscriptions"
 import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent, type GoalAnalyticsConfig } from "@/lib/google-data"
 import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
 import { assumedDriverValues, buildGoalScenarios, getGoalBreakdown, isScenarioId, measuredDriverAmounts, requiredDriverValues, type DriverValue, type ScenarioId } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, isGoalMetric } from "@/lib/goals"
 import { rankImprovementCandidates } from "@/lib/action-candidates"
+
 import { goalPeriodComparison, goalProgress } from "@/lib/goal-progress"
 import { requireSession } from "@/lib/session"
 import { isSiteCategory, siteCategories } from "@/lib/site-categories"
@@ -32,15 +36,19 @@ export default async function GoalDetailPage({ params, searchParams }: { params:
   const { siteId, goalId } = await params
   const requestedScenario = (await searchParams).scenario ?? ""
   const scenario: ScenarioId = isScenarioId(requestedScenario) ? requestedScenario : "standard"
-  const [[item], [registeredSite], [googleAccount], savedKeyEvents, savedCtaPages] = await Promise.all([
+  const [[item], [registeredSite], [googleAccount], savedKeyEvents, savedCtaPages, [plan]] = await Promise.all([
     db.select().from(goal).where(and(eq(goal.id, goalId), eq(goal.siteId, siteId), eq(goal.userId, current.user.id))).limit(1),
     db.select().from(site).where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1),
     db.select({ accountId: account.accountId }).from(account).where(and(eq(account.userId, current.user.id), eq(account.providerId, "google"))).limit(1),
     db.select().from(goalKeyEvent).where(eq(goalKeyEvent.goalId, goalId)),
     db.select().from(goalCtaPage).where(eq(goalCtaPage.goalId, goalId)).orderBy(asc(goalCtaPage.createdAt)),
+    db.select({ status: subscription.status, grace: subscription.gracePeriodEndsAt })
+      .from(subscription).where(eq(subscription.userId, current.user.id)).limit(1),
   ])
   if (!item || !registeredSite || !isGoalMetric(item.metric)) notFound()
 
+  // 検索ボリュームは従量課金の外部APIなので、有料プランの利用者にだけ引く。
+  const paidAccess = hasPaidAccess(plan?.status, plan?.grace)
   const definition = goalMetrics[item.metric]
   const breakdown = getGoalBreakdown(item.metric)
   const category = registeredSite?.category && isSiteCategory(registeredSite.category) ? registeredSite.category : null
@@ -63,7 +71,7 @@ export default async function GoalDetailPage({ params, searchParams }: { params:
     }] : []
     const [actualResult, keyEventsResult] = await Promise.allSettled([
       canLoadActuals
-        ? loadGoogleGoalMetrics(googleAccount.accountId, requestHeaders, registeredSite.searchConsoleProperty, registeredSite.ga4Property, keywords, analyticsGoalConfigs)
+        ? loadGoogleGoalMetrics(googleAccount.accountId, requestHeaders, registeredSite.searchConsoleProperty, registeredSite.ga4Property, keywords, analyticsGoalConfigs, { includeQueries: paidAccess, includePages: true })
         : Promise.resolve(null),
       canLoadKeyEvents
         ? loadGoogleKeyEvents(googleAccount.accountId, requestHeaders, registeredSite.ga4Property!)
@@ -71,7 +79,7 @@ export default async function GoalDetailPage({ params, searchParams }: { params:
     ])
     if (actualResult.status === "fulfilled") actuals = actualResult.value
     else {
-      actuals = { values: {}, keywordValues: {}, observations: {}, goalValues: {}, goalObservations: {}, numericObservations: {}, searchPages: [], errors: ["Googleの実測値を取得できませんでした。"], period: "" }
+      actuals = { values: {}, keywordValues: {}, observations: {}, goalValues: {}, goalObservations: {}, numericObservations: {}, searchPages: [], searchQueries: [], errors: ["Googleの実測値を取得できませんでした。"], period: "" }
     }
     if (keyEventsResult.status === "fulfilled") availableKeyEvents = keyEventsResult.value
     else {
@@ -95,6 +103,7 @@ export default async function GoalDetailPage({ params, searchParams }: { params:
   // 10〜20位のページから候補を出す。目標の差分とはまだ連動しておらず、
   // 不足しているドライバーを判定してから施策型を引く流れは未実装（docs/action-selection-logic.md ④⑤）。
   const rankCandidates = rankImprovementCandidates(actuals?.searchPages ?? [])
+
   const comparison = goalPeriodComparison(item.period)
   // 実測はGoogleの直近28日分なので、最終目標と同じ期間の判定に従う。
   const requirements = comparison.comparable
@@ -136,6 +145,9 @@ export default async function GoalDetailPage({ params, searchParams }: { params:
       <GoalDriverTree drivers={breakdown.drivers} currentValues={currentValues} requirements={requirements} />
       <p className="muted">各データ元を連携すると現在値を取得し、目標達成に必要な値と優先する施策を計算します。</p>
     </section> : <section className="card"><h2>目標のブレークダウン</h2><p className="muted">この指標のブレークダウンはまだ定義されていません。</p></section>}
+    {paidAccess && (actuals?.searchQueries.length ?? 0) > 0 && <Suspense fallback={<KeywordDemandFallback />}>
+      <KeywordDemandSection queries={actuals?.searchQueries ?? []} />
+    </Suspense>}
     {rankCandidates.length > 0 && <section className="card stack">
       <div><h2>差分を埋める施策候補</h2><p className="muted">検索表示回数を増やすための候補です。1ページ目の手前にあり、表示回数が多い順に並べています。</p></div>
       <ActionCandidates candidates={rankCandidates} />
