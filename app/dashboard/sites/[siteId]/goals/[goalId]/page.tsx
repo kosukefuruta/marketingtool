@@ -92,7 +92,8 @@ export default async function GoalDetailPage({ params, searchParams }: { params:
   const keywordActual = item.metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
   const currentActual = keywordActual ?? actuals?.goalValues[item.id]?.["goal-total"] ?? googleValueForGoal(item.metric, actuals)
   const measuredAmounts = measuredDriverAmounts(currentValues)
-  // 検索表示回数に差分があるときだけ、その差分を埋める施策候補を出す。
+  // 10〜20位のページから候補を出す。目標の差分とはまだ連動しておらず、
+  // 不足しているドライバーを判定してから施策型を引く流れは未実装（docs/action-selection-logic.md ④⑤）。
   const rankCandidates = rankImprovementCandidates(actuals?.searchPages ?? [])
   const comparison = goalPeriodComparison(item.period)
   // 実測はGoogleの直近28日分なので、最終目標と同じ期間の判定に従う。
