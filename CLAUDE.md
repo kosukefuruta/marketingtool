@@ -8,6 +8,8 @@ Owtellは、URLを入力して技術SEO上の問題を診断し、将来的にSE
 
 - 現行仕様: `docs/seo-audit-v0.1.md`
 - 施策エンジン構想: `docs/goal-driven-action-planning.md`
+- 施策型カタログ: `docs/action-type-catalog.md`
+- 施策選択ロジック: `docs/action-selection-logic.md`
 - プロダクト計画: `docs/product-plan.md`
 - 有料機能要件: `docs/paid-feature-requirements.md`
 - Phase 1計画: `docs/phase1-auth-site-billing-plan.md`
