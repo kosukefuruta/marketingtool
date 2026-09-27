@@ -1,4 +1,4 @@
-import { DataForSeoError, fetchSearchVolumes, hasDataForSeoCredentials, type SearchVolume } from "./dataforseo"
+import { fetchSearchVolumes, hasDataForSeoCredentials, type SearchVolume } from "./dataforseo"
 import type { SearchQueryMetric } from "./google-data"
 
 /** ボリュームを引くクエリ数の上限。1リクエストで足り、費用が読める範囲に抑える。 */
@@ -54,10 +54,8 @@ export async function loadKeywordDemand(queries: SearchQueryMetric[]): Promise<{
   try {
     const volumes = await fetchSearchVolumes(top.map((query) => query.query))
     return { rows: mergeVolumes(top, volumes), error: null }
-  } catch (error) {
-    return {
-      rows: mergeVolumes(top, []),
-      error: error instanceof DataForSeoError ? error.message : "検索ボリュームを取得できませんでした。",
-    }
+  } catch {
+    // 失敗の詳細はログ（[dataforseo]）にある。画面には外部サービスの内部メッセージを出さない。
+    return { rows: mergeVolumes(top, []), error: "検索ボリュームを取得できませんでした。実績のみ表示しています。" }
   }
 }

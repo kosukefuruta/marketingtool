@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { clearSearchVolumeCache, DataForSeoError, fetchSearchVolumes, hasDataForSeoCredentials, SEARCH_VOLUME_BATCH_SIZE } from "./dataforseo"
+import { clearSearchVolumeCache, DataForSeoError, fetchSearchVolumes, hasDataForSeoCredentials, KEYWORD_MAX_LENGTH, KEYWORD_MAX_WORDS, sanitizeKeywords, SEARCH_VOLUME_BATCH_SIZE } from "./dataforseo"
 
 function jsonResponse(body: object, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
@@ -84,8 +84,35 @@ describe("DataForSEO search volumes", () => {
 
   it("drops blanks and duplicates before asking", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => volumeResponse([{ keyword: "seo", search_volume: 100 }]))
-    await fetchSearchVolumes([" seo ", "seo", "", "   "])
+    await fetchSearchVolumes([" seo ", "seo", "", "   ", "SEO"])
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))[0].keywords).toEqual(["seo"])
+  })
+
+  it("puts the task message into the error so the cause can be found", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => jsonResponse({
+      status_code: 20000,
+      tasks: [{ status_code: 40501, status_message: "Invalid Field: 'keywords'" }],
+    }))
+    await expect(fetchSearchVolumes(["seo"])).rejects.toThrow("Invalid Field")
+  })
+
+  it("keeps out the keywords Google Ads rejects", () => {
+    // 1件でも不正だとタスク全体が失敗し、他のキーワードの結果も失われる。
+    expect(sanitizeKeywords([
+      "SEO ツール",
+      "  問い合わせ   フォーム  ",
+      "a".repeat(KEYWORD_MAX_LENGTH + 1),
+      Array.from({ length: KEYWORD_MAX_WORDS + 1 }, (_, index) => `word${index}`).join(" "),
+      "what is seo?",
+      "seo | tools",
+      "",
+    ])).toEqual(["seo ツール", "問い合わせ フォーム"])
+  })
+
+  it("keeps a keyword that sits exactly on the limits", () => {
+    const longest = "a".repeat(KEYWORD_MAX_LENGTH)
+    const widest = Array.from({ length: KEYWORD_MAX_WORDS }, (_, index) => `w${index}`).join(" ")
+    expect(sanitizeKeywords([longest, widest])).toEqual([longest, widest])
   })
 
   it("asks for nothing when there is no keyword", async () => {
