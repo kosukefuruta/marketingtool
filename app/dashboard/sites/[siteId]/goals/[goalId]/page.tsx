@@ -13,7 +13,7 @@ import { db } from "@/lib/db"
 import { account, goal, goalCtaPage, goalKeyEvent, site } from "@/lib/db/schema"
 import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent, type GoalAnalyticsConfig } from "@/lib/google-data"
 import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
-import { assumedDriverValues, buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
+import { assumedDriverValues, buildGoalScenarios, getGoalBreakdown, measuredDriverAmounts, requiredDriverValues, type DriverValue } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, isGoalMetric } from "@/lib/goals"
 import { goalPeriodComparison, goalProgress } from "@/lib/goal-progress"
 import { requireSession } from "@/lib/session"
@@ -73,15 +73,20 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
   }
   const observations = { ...actuals?.observations, ...actuals?.goalObservations[item.id] }
   const scenarios = buildGoalScenarios(item.metric, item.targetValue, category, observations, actuals?.numericObservations, item.pageRpmRevenue, item.pageRpmPageviews)
-  const currentValues = {
+  const currentValues: Record<string, DriverValue> = {
     ...assumedDriverValues(item.metric, category, observations, actuals?.numericObservations, item.pageRpmRevenue, item.pageRpmPageviews),
     ...actuals?.values,
     ...actuals?.goalValues[item.id],
-    ...(item.pageRpmRevenue === null || item.pageRpmPageviews === null ? {} : { "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue / item.pageRpmPageviews * 1000)}円/1,000PV`, detail: `広告収益 ${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue)}円 / ${new Intl.NumberFormat("ja-JP").format(item.pageRpmPageviews)}PV` } }),
+    ...(item.pageRpmRevenue === null || item.pageRpmPageviews === null ? {} : { "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue / item.pageRpmPageviews * 1000)}円/1,000PV`, detail: `広告収益 ${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue)}円 / ${new Intl.NumberFormat("ja-JP").format(item.pageRpmPageviews)}PV`, amount: item.pageRpmRevenue / item.pageRpmPageviews * 1000 } }),
   }
   const keywordActual = item.metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
   const currentActual = keywordActual ?? actuals?.goalValues[item.id]?.["goal-total"] ?? googleValueForGoal(item.metric, actuals)
+  const measuredAmounts = measuredDriverAmounts(currentValues)
   const comparison = goalPeriodComparison(item.period)
+  // 実測はGoogleの直近28日分なので、最終目標と同じ期間の判定に従う。
+  const requirements = comparison.comparable
+    ? requiredDriverValues(item.metric, item.targetValue, category, observations, actuals?.numericObservations, item.pageRpmRevenue, item.pageRpmPageviews, measuredAmounts)
+    : {}
   const progress = comparison.comparable ? goalProgress(item.metric, currentActual?.amount, item.targetValue) : null
   const phase = actuals?.goalObservations[item.id] && Object.keys(actuals.goalObservations[item.id]).length > 0 ? "実測補正中" : breakdown?.phase ?? "未定義"
   return <div className="stack">
@@ -103,8 +108,12 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ sit
       {item.metric === "adRevenue" && <GoalPageRpmForm siteId={siteId} goalId={item.id} legacyPageRpm={item.pageRpm} pageRpmRevenue={item.pageRpmRevenue} pageRpmPageviews={item.pageRpmPageviews} />}
     </section>
     {breakdown ? <section className="card stack">
-      <div><h2>目標のブレークダウン</h2><p className="goal-formula">{breakdown.formula}</p></div>
-      <GoalDriverTree drivers={breakdown.drivers} currentValues={currentValues} />
+      <div><h2>目標のブレークダウン</h2><p className="goal-formula">{breakdown.formula}</p>
+        {comparison.comparable
+          ? comparison.note && <p className="muted">必要値との差分も{comparison.note}</p>
+          : <p className="muted">{comparison.reason}必要値との差分は表示していません。</p>}
+      </div>
+      <GoalDriverTree drivers={breakdown.drivers} currentValues={currentValues} requirements={requirements} />
       <p className="muted">各データ元を連携すると現在値を取得し、目標達成に必要な値と優先する施策を計算します。</p>
     </section> : <section className="card"><h2>目標のブレークダウン</h2><p className="muted">この指標のブレークダウンはまだ定義されていません。</p></section>}
     {scenarios.length > 0 && <section className="card stack">

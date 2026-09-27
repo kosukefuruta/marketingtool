@@ -147,7 +147,7 @@ function yen(value: number): string {
   return `${Math.round(value).toLocaleString("ja-JP")}円`
 }
 
-export type DriverValue = { value: string; detail?: string; assumed?: boolean }
+export type DriverValue = { value: string; detail?: string; assumed?: boolean; amount?: number }
 
 function assumedRate(prior: [number, number, number], observation?: RateObservation): DriverValue {
   const [low, median, high] = updatedRates(prior, observation)
@@ -184,6 +184,83 @@ export function assumedDriverValues(metric: GoalMetric, category?: SiteCategory 
     }
   }
   return {}
+}
+
+export type DriverTarget = { value: number; note?: string }
+
+const amountFormat = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 })
+
+export function formatDriverAmount(value: number, unit: string): string {
+  return `${amountFormat.format(value)}${unit}`
+}
+
+/** 目標達成に必要な水準。標準シナリオの前提を使い、実測が入っていればその値で補正する。 */
+export function requiredDriverValues(metric: GoalMetric, target: number, category?: SiteCategory | null, observations: Record<string, RateObservation> = {}, numericObservations: Record<string, NumericObservation> = {}, manualPageRpmRevenue?: number | null, manualPageRpmPageviews?: number | null, currentAmounts: Record<string, number> = {}): Record<string, DriverTarget> {
+  // 検索側は「クリック数は自然検索セッション数と同水準」「CTRは現状維持」を前提に逆算する。
+  const searchTargets = (requiredSessions: number): Record<string, DriverTarget> => {
+    const ctr = currentAmounts.ctr
+    return {
+      "organic-clicks": { value: Math.ceil(requiredSessions), note: "自然検索セッション数と同水準のクリック数が必要" },
+      ...(ctr !== undefined && ctr > 0
+        ? { impressions: { value: Math.ceil(requiredSessions / (ctr / 100)), note: `現在のCTR ${amountFormat.format(ctr)}%を維持した場合` } }
+        : {}),
+    }
+  }
+
+  // 率とRPMは「その水準が続く前提」で volume を逆算するための仮定であって、
+  // 目標が要求する水準ではない。必要値として出すと、実際には求めていない差分を作ってしまう。
+  if (metric === "conversions") {
+    const ctaRate = updatedRates(ctaRatePrior, observations["cta-rate"])[1]
+    const cvr = updatedRates(ctaCvrPrior, observations["cta-cvr"])[1]
+    const organic = target / cvr / ctaRate
+    return {
+      "conversion-sessions": { value: target },
+      "cta-sessions": { value: Math.ceil(target / cvr) },
+      "organic-sessions": { value: Math.ceil(organic) },
+      ...searchTargets(organic),
+    }
+  }
+  if (metric === "paidContracts") {
+    const ctaRate = updatedRates(ctaRatePrior, observations["cta-rate"])[1]
+    const freeCvr = updatedRates(freeCvrPrior, observations["free-cvr"])[1]
+    const paidRate = updatedRates(paidRatePrior, observations["paid-rate"])[1]
+    const organic = target / paidRate / freeCvr / ctaRate
+    return {
+      "paid-conversion-sessions": { value: target },
+      "free-conversion-sessions": { value: Math.ceil(target / paidRate) },
+      "cta-sessions": { value: Math.ceil(target / paidRate / freeCvr) },
+      "organic-sessions": { value: Math.ceil(organic) },
+      ...searchTargets(organic),
+    }
+  }
+  if (metric === "adRevenue" && category) {
+    const rpm = pageRpmBand(category, numericObservations, manualPageRpmRevenue, manualPageRpmPageviews).values[1]
+    const pageviews = target / rpm * 1000
+    const viewsPerSession = currentAmounts["pages-per-session"]
+    return {
+      pageviews: { value: Math.ceil(pageviews) },
+      ...(viewsPerSession !== undefined && viewsPerSession > 0
+        ? { sessions: { value: Math.ceil(pageviews / viewsPerSession), note: `現在のセッションあたり${amountFormat.format(viewsPerSession)}PVを維持した場合` } }
+        : {}),
+    }
+  }
+  return {}
+}
+
+/** 逆算に使える実測値だけを取り出す。仮定値は実測ではないので除く。 */
+export function measuredDriverAmounts(currentValues: Record<string, DriverValue>): Record<string, number> {
+  return Object.fromEntries(Object.entries(currentValues)
+    .flatMap(([id, value]) => value.assumed || value.amount === undefined ? [] : [[id, value.amount] as const]))
+}
+
+/** ドライバーの差分。達成済みなら「達成」、実測が無ければnull。 */
+export function driverGapLabel(required: number, current: number | undefined, unit: string): string | null {
+  if (current === undefined || !Number.isFinite(current)) return null
+  // 表示桁で0に丸まる不足は「あと0」ではなく達成として扱う。
+  const gap = Math.round((required - current) * 100) / 100
+  if (gap <= 0) return "達成"
+  const gapUnit = unit.endsWith("/月") ? unit.slice(0, -2) : unit
+  return `あと${formatDriverAmount(gap, gapUnit)}`
 }
 
 export function buildGoalScenarios(metric: GoalMetric, target: number, category?: SiteCategory | null, observations: Record<string, RateObservation> = {}, numericObservations: Record<string, NumericObservation> = {}, manualPageRpmRevenue?: number | null, manualPageRpmPageviews?: number | null): GoalScenario[] {

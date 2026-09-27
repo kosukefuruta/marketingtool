@@ -195,12 +195,12 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
       const sessions = metricNumber(report, 0); const views = metricNumber(report, 1); const viewsPerSession = metricNumber(report, 2); const adRevenue = metricNumber(report, 3)
       if (sessions !== null) values.sessions = { value: `${number.format(sessions)}セッション`, amount: sessions }
       if (views !== null) values.pageviews = { value: `${number.format(views)}PV`, amount: views }
-      if (viewsPerSession !== null) values["pages-per-session"] = { value: `${number.format(viewsPerSession)}PV` }
+      if (viewsPerSession !== null) values["pages-per-session"] = { value: `${number.format(viewsPerSession)}PV`, amount: viewsPerSession }
       if (adRevenue !== null && report.metadata?.currencyCode === "JPY") values["ad-revenue"] = { value: `${number.format(adRevenue)}円`, amount: adRevenue }
       if (views !== null && views > 0 && adRevenue !== null && report.metadata?.currencyCode === "JPY") {
         const rpm = adRevenue / views * 1000
         const weight = views / (views + RPM_PRIOR_PAGEVIEWS)
-        values["page-rpm"] = { value: `${number.format(rpm)}円/1,000PV`, detail: `広告収益 ${number.format(adRevenue)}円 / ${number.format(views)}PV` }
+        values["page-rpm"] = { value: `${number.format(rpm)}円/1,000PV`, detail: `広告収益 ${number.format(adRevenue)}円 / ${number.format(views)}PV`, amount: rpm }
         if (Number.isFinite(rpm) && rpm >= 0) numericObservations["page-rpm"] = { value: rpm, weight }
       }
     }).catch((error) => { hasApiError = true; errors.push(`GA4: ${errorMessage(error)}`) }))
@@ -286,21 +286,21 @@ export async function loadGoogleGoalMetrics(providerAccountId: string, requestHe
       const addRate = (id: string, successes: number | undefined, trials: number | null | undefined, successLabel: string, trialLabel: string) => {
         if (successes === undefined || trials === undefined || trials === null || trials <= 0 || successes > trials) return
         observationsForGoal[id] = { successes, trials }
-        valuesForGoal[id] = { value: `${number.format(successes / trials * 100)}%`, detail: `${successLabel} ${number.format(successes)} / ${trialLabel} ${number.format(trials)}` }
+        valuesForGoal[id] = { value: `${number.format(successes / trials * 100)}%`, detail: `${successLabel} ${number.format(successes)} / ${trialLabel} ${number.format(trials)}`, amount: successes / trials * 100 }
       }
-      if (count.cta !== undefined) valuesForGoal["cta-sessions"] = { value: `${number.format(count.cta)}セッション`, detail: "直近28日の自然検索経由" }
+      if (count.cta !== undefined) valuesForGoal["cta-sessions"] = { value: `${number.format(count.cta)}セッション`, detail: "直近28日の自然検索経由", amount: count.cta }
       addRate("cta-rate", count.cta, organicSessions, "CTA到達セッション", "自然検索セッション")
       if (config.metric === "conversions") {
         if (count.conversionSessions !== undefined) {
-          const conversionValue = { value: `${number.format(count.conversionSessions)}セッション`, detail: "直近28日の自然検索経由" }
+          const conversionValue = { value: `${number.format(count.conversionSessions)}セッション`, detail: "直近28日の自然検索経由", amount: count.conversionSessions }
           valuesForGoal["conversion-sessions"] = conversionValue
           valuesForGoal["goal-total"] = { value: `${number.format(count.conversionSessions)}件`, detail: "直近28日に自然検索経由で選択キーイベントが発生したセッション数", amount: count.conversionSessions }
         }
         addRate("cta-cvr", count.conversionSessions, count.cta, "CV発生セッション", "CTA到達セッション（推定比）")
       } else {
-        if (count.freeSessions !== undefined) valuesForGoal["free-conversion-sessions"] = { value: `${number.format(count.freeSessions)}セッション`, detail: "直近28日の自然検索経由" }
+        if (count.freeSessions !== undefined) valuesForGoal["free-conversion-sessions"] = { value: `${number.format(count.freeSessions)}セッション`, detail: "直近28日の自然検索経由", amount: count.freeSessions }
         if (count.paidSessions !== undefined) {
-          valuesForGoal["paid-conversion-sessions"] = { value: `${number.format(count.paidSessions)}セッション`, detail: "直近28日の自然検索経由" }
+          valuesForGoal["paid-conversion-sessions"] = { value: `${number.format(count.paidSessions)}セッション`, detail: "直近28日の自然検索経由", amount: count.paidSessions }
           valuesForGoal["goal-total"] = { value: `${number.format(count.paidSessions)}件`, detail: "直近28日に自然検索経由で有料契約キーイベントが発生したセッション数", amount: count.paidSessions }
         }
         addRate("free-cvr", count.freeSessions, count.cta, "無料登録セッション", "CTA到達セッション（推定比）")
