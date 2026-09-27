@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { assumedDriverValues, buildGoalScenarios, getGoalBreakdown } from "./goal-breakdowns"
+import { assumedDriverValues, buildGoalScenarios, driverGapLabel, getGoalBreakdown, measuredDriverAmounts, requiredDriverValues } from "./goal-breakdowns"
 import { isSiteCategory } from "./site-categories"
 
 describe("goal breakdown definitions", () => {
@@ -148,6 +148,106 @@ describe("goal breakdown definitions", () => {
   it("assumes nothing for a metric without a breakdown or without a genre", () => {
     expect(assumedDriverValues("averagePosition")).toEqual({})
     expect(assumedDriverValues("adRevenue", null)).toEqual({})
+  })
+
+  it("works back from a conversion target to every driver it needs", () => {
+    const required = requiredDriverValues("conversions", 10)
+    expect(required["conversion-sessions"].value).toBe(10)
+    expect(required["cta-sessions"].value).toBe(1000)
+    expect(required["organic-sessions"].value).toBe(33334)
+  })
+
+  it("leaves the assumed rates out of the required values", () => {
+    // 率は「その水準が続く前提」であって、目標が要求する水準ではない。
+    const conversions = requiredDriverValues("conversions", 10, null, { "cta-rate": { successes: 10, trials: 1000 } })
+    expect(conversions["cta-rate"]).toBeUndefined()
+    expect(conversions["cta-cvr"]).toBeUndefined()
+
+    const paid = requiredDriverValues("paidContracts", 10)
+    expect(paid["cta-rate"]).toBeUndefined()
+    expect(paid["free-cvr"]).toBeUndefined()
+    expect(paid["paid-rate"]).toBeUndefined()
+
+    expect(requiredDriverValues("adRevenue", 100000, "entertainment")["page-rpm"]).toBeUndefined()
+  })
+
+  it("matches the standard scenario even when measured rates move it", () => {
+    const observations = { "cta-rate": { successes: 271, trials: 10_000 }, "cta-cvr": { successes: 123, trials: 10_000 } }
+    const standard = buildGoalScenarios("conversions", 10, null, observations).find((scenario) => scenario.id === "standard")!
+    const required = requiredDriverValues("conversions", 10, null, observations)
+    expect(required["cta-sessions"].value).toBe(standard.requirements[0].value)
+    expect(required["organic-sessions"].value).toBe(standard.requirements[1].value)
+  })
+
+  it("works back through the paid contract funnel", () => {
+    const required = requiredDriverValues("paidContracts", 10)
+    expect(required["paid-conversion-sessions"].value).toBe(10)
+    expect(required["free-conversion-sessions"].value).toBe(100)
+    expect(required["cta-sessions"].value).toBe(2000)
+    expect(required["organic-sessions"].value).toBe(66667)
+  })
+
+  it("keeps the paid contract funnel in step with its scenario", () => {
+    const observations = {
+      "cta-rate": { successes: 271, trials: 10_000 },
+      "free-cvr": { successes: 470, trials: 10_000 },
+      "paid-rate": { successes: 97, trials: 1000 },
+    }
+    const standard = buildGoalScenarios("paidContracts", 10, null, observations).find((scenario) => scenario.id === "standard")!
+    const required = requiredDriverValues("paidContracts", 10, null, observations)
+    expect(required["free-conversion-sessions"].value).toBe(standard.requirements[0].value)
+    expect(required["cta-sessions"].value).toBe(standard.requirements[1].value)
+    expect(required["organic-sessions"].value).toBe(standard.requirements[2].value)
+  })
+
+  it("derives the impressions a target needs from the measured CTR", () => {
+    const withoutCtr = requiredDriverValues("conversions", 10)
+    expect(withoutCtr.impressions).toBeUndefined()
+    expect(withoutCtr["organic-clicks"].value).toBe(33334)
+
+    const withCtr = requiredDriverValues("conversions", 10, null, {}, {}, null, null, { ctr: 2 })
+    expect(withCtr.impressions).toEqual({ value: 1666667, note: "現在のCTR 2%を維持した場合" })
+  })
+
+  it("works back from advertising revenue to pageviews and sessions", () => {
+    const required = requiredDriverValues("adRevenue", 100000, "entertainment", {}, {}, null, null, { "pages-per-session": 2 })
+    expect(required.pageviews.value).toBe(250000)
+    expect(required.sessions).toEqual({ value: 125000, note: "現在のセッションあたり2PVを維持した場合" })
+
+    const standard = buildGoalScenarios("adRevenue", 100000, "entertainment").find((scenario) => scenario.id === "standard")!
+    expect(required.pageviews.value).toBe(standard.requirements[0].value)
+  })
+
+  it("requires nothing for a metric without a breakdown or without a genre", () => {
+    expect(requiredDriverValues("averagePosition", 3)).toEqual({})
+    expect(requiredDriverValues("adRevenue", 100000, null)).toEqual({})
+  })
+
+  it("states the gap between a measured driver and what the goal needs", () => {
+    expect(driverGapLabel(1000, 250, "セッション/月")).toBe("あと750セッション")
+    expect(driverGapLabel(1000, 1000, "セッション/月")).toBe("達成")
+    expect(driverGapLabel(1000, 1200, "セッション/月")).toBe("達成")
+    expect(driverGapLabel(400, 250, "円/1,000PV")).toBe("あと150円/1,000PV")
+    expect(driverGapLabel(3, 1.2, "%")).toBe("あと1.8%")
+  })
+
+  it("treats a shortfall that rounds to zero as reached", () => {
+    expect(driverGapLabel(2.7119717, 2.71, "%")).toBe("達成")
+    expect(driverGapLabel(1000.004, 1000, "セッション/月")).toBe("達成")
+    expect(driverGapLabel(1000.02, 1000, "セッション/月")).toBe("あと0.02セッション")
+  })
+
+  it("keeps assumptions out of the measured amounts", () => {
+    expect(measuredDriverAmounts({
+      "organic-sessions": { value: "1,200セッション", amount: 1200 },
+      "cta-rate": { value: "3%", amount: 3, assumed: true },
+      ctr: { value: "算出不可" },
+    })).toEqual({ "organic-sessions": 1200 })
+  })
+
+  it("states no gap without a measured value", () => {
+    expect(driverGapLabel(1000, undefined, "セッション/月")).toBeNull()
+    expect(driverGapLabel(1000, Number.NaN, "セッション/月")).toBeNull()
   })
 
   it("rejects inherited object properties as site categories", () => {

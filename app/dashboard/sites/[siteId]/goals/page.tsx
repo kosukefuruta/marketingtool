@@ -15,7 +15,7 @@ import { db } from "@/lib/db"
 import { account, goal, goalCtaPage, goalKeyEvent, site } from "@/lib/db/schema"
 import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type AnalyticsKeyEvent, type GoalAnalyticsConfig } from "@/lib/google-data"
 import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
-import { assumedDriverValues, buildGoalScenarios, getGoalBreakdown } from "@/lib/goal-breakdowns"
+import { assumedDriverValues, buildGoalScenarios, getGoalBreakdown, measuredDriverAmounts, requiredDriverValues, type DriverValue } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, goalSubjects, isGoalMetric, isGoalPeriod, isGoalSubject } from "@/lib/goals"
 import { goalPeriodComparison, goalProgress } from "@/lib/goal-progress"
 import { requireSession } from "@/lib/session"
@@ -102,16 +102,21 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
         const breakdown = metric ? getGoalBreakdown(metric) : null
         const observations = { ...actuals?.observations, ...actuals?.goalObservations[item.id] }
         const scenarios = metric ? buildGoalScenarios(metric, item.targetValue, siteCategory, observations, actuals?.numericObservations, item.pageRpmRevenue, item.pageRpmPageviews) : []
-        const currentValues = {
+        const currentValues: Record<string, DriverValue> = {
           ...(metric ? assumedDriverValues(metric, siteCategory, observations, actuals?.numericObservations, item.pageRpmRevenue, item.pageRpmPageviews) : {}),
           ...actuals?.values,
           ...actuals?.goalValues[item.id],
-          ...(item.pageRpmRevenue === null || item.pageRpmPageviews === null ? {} : { "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue / item.pageRpmPageviews * 1000)}円/1,000PV`, detail: `広告収益 ${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue)}円 / ${new Intl.NumberFormat("ja-JP").format(item.pageRpmPageviews)}PV` } }),
+          ...(item.pageRpmRevenue === null || item.pageRpmPageviews === null ? {} : { "page-rpm": { value: `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue / item.pageRpmPageviews * 1000)}円/1,000PV`, detail: `広告収益 ${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 }).format(item.pageRpmRevenue)}円 / ${new Intl.NumberFormat("ja-JP").format(item.pageRpmPageviews)}PV`, amount: item.pageRpmRevenue / item.pageRpmPageviews * 1000 } }),
         }
         const keywordActual = metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
         const metricActual = metric ? googleValueForGoal(metric, actuals) : null
         const currentActual = keywordActual ?? actuals?.goalValues[item.id]?.["goal-total"] ?? metricActual
+        const measuredAmounts = measuredDriverAmounts(currentValues)
         const comparison = goalPeriodComparison(item.period)
+        // 実測はGoogleの直近28日分なので、最終目標と同じ期間の判定に従う。
+        const requirements = metric && comparison.comparable
+          ? requiredDriverValues(metric, item.targetValue, siteCategory, observations, actuals?.numericObservations, item.pageRpmRevenue, item.pageRpmPageviews, measuredAmounts)
+          : {}
         const progress = metric && comparison.comparable ? goalProgress(metric, currentActual?.amount, item.targetValue) : null
         const selectedKeyEvents = groupGoalKeyEvents(savedKeyEvents.filter((entry) => entry.goalId === item.id))
         const ctaPaths = savedCtaPages.filter((entry) => entry.goalId === item.id).map((entry) => entry.path)
@@ -132,8 +137,12 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
           {metric === "adRevenue" && !siteCategory && <p className="status">サイトジャンルを設定すると、ページRPMの仮定値と達成シナリオを表示します。<Link href={`/dashboard/sites/${siteId}/settings`}>サイトジャンルを設定</Link></p>}
           {metric === "adRevenue" && <GoalPageRpmForm siteId={siteId} goalId={item.id} legacyPageRpm={item.pageRpm} pageRpmRevenue={item.pageRpmRevenue} pageRpmPageviews={item.pageRpmPageviews} />}
           {breakdown ? <div className="stack">
-            <div><h4>目標のブレークダウン</h4><p className="goal-formula">{breakdown.formula}</p></div>
-            <GoalDriverTree drivers={breakdown.drivers} currentValues={currentValues} />
+            <div><h4>目標のブレークダウン</h4><p className="goal-formula">{breakdown.formula}</p>
+              {comparison.comparable
+                ? comparison.note && <p className="muted">必要値との差分も{comparison.note}</p>
+                : <p className="muted">{comparison.reason}必要値との差分は表示していません。</p>}
+            </div>
+            <GoalDriverTree drivers={breakdown.drivers} currentValues={currentValues} requirements={requirements} />
           </div> : <p className="muted">この指標のブレークダウンはまだ定義されていません。</p>}
           {scenarios.length > 0 && <div className="stack">
             <div><h4>達成シナリオ</h4><p className="muted">CTA関連は計測設定ができるまで初期仮定を使います。取得できた割合やページRPMは、データ量に応じて実測へ補正します。</p></div>
