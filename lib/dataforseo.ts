@@ -53,11 +53,35 @@ export async function dataForSeoPost<T>(path: string, payload: unknown[]): Promi
     throw new DataForSeoError(`DataForSEOがリクエストを受け付けませんでした（${body.status_code}）。`)
   }
   const failed = body.tasks?.find((task) => task.status_code !== TASK_SUCCESS)
-  if (failed) throw new DataForSeoError(`DataForSEOのタスクが失敗しました（${failed.status_code}）。`)
+  if (failed) {
+    // 原因の特定にはstatus_messageが要る。ログへ残し、呼び出し元にも渡す。
+    console.warn(`[dataforseo] task failed ${failed.status_code}: ${failed.status_message ?? "(no message)"} path=${path}`)
+    throw new DataForSeoError(`DataForSEOのタスクが失敗しました（${failed.status_code} ${failed.status_message ?? ""}）。`.replace(" ）", "）"))
+  }
   return (body.tasks ?? []).flatMap((task) => task.result ?? [])
 }
 
 export type SearchVolume = { keyword: string; volume: number | null; competition: number | null }
+
+/** Google Ads側の制約。超えるキーワードが1件でも混ざるとタスク全体が失敗する。 */
+export const KEYWORD_MAX_LENGTH = 80
+export const KEYWORD_MAX_WORDS = 10
+// Google Adsがキーワードに受け付けない記号。
+const DISALLOWED_CHARACTERS = /[!@%^()={};~`<>?\\|*"'\[\]]/
+
+/**
+ * 送れる形に整える。Google Adsは小文字で扱うため小文字化し、制約を超えるものは落とす。
+ * 1件でも不正だとタスク全体が失敗し、他のキーワードの結果も得られなくなる。
+ */
+export function sanitizeKeywords(keywords: string[]): string[] {
+  const cleaned = keywords
+    .map((keyword) => keyword.trim().toLowerCase().replace(/\s+/g, " "))
+    .filter((keyword) => keyword.length > 0
+      && keyword.length <= KEYWORD_MAX_LENGTH
+      && keyword.split(" ").length <= KEYWORD_MAX_WORDS
+      && !DISALLOWED_CHARACTERS.test(keyword))
+  return [...new Set(cleaned)]
+}
 
 type SearchVolumeRow = { keyword?: string; search_volume?: number | null; competition_index?: number | null }
 
@@ -79,7 +103,7 @@ export async function fetchSearchVolumes(
   keywords: string[],
   { locationCode = JAPAN_LOCATION_CODE, languageCode = JAPANESE_LANGUAGE_CODE } = {},
 ): Promise<SearchVolume[]> {
-  const unique = [...new Set(keywords.map((keyword) => keyword.trim()).filter(Boolean))]
+  const unique = sanitizeKeywords(keywords)
   if (unique.length === 0) return []
 
   const now = Date.now()
