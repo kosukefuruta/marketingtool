@@ -11,7 +11,7 @@ function Driver({ driver, currentValues, requirements }: DriverProps) {
   const required = requirements[driver.id]
   // 率はシナリオ間の差を見たいので推定中央値を基準にする。量は実測があるときだけ差分を出す。
   const currentForGap = required?.baseline ?? (current?.assumed ? undefined : current?.amount)
-  const gap = required ? driverGapLabel(required.value, currentForGap, driver.unit) : null
+  const gap = required ? driverGapLabel(required, currentForGap, driver.unit) : null
   return <li className="goal-driver">
     <div className="goal-driver-card">
       <div>

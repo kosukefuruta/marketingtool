@@ -121,7 +121,10 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
         const selectedKeyEvents = groupGoalKeyEvents(savedKeyEvents.filter((entry) => entry.goalId === item.id))
         const ctaPaths = savedCtaPages.filter((entry) => entry.goalId === item.id).map((entry) => entry.path)
         return <article className="goal-card stack" id={`goal-${item.id}`} key={item.id}>
-          <h3>{item.name}</h3>
+          <div className="goal-card-heading">
+            <h3>{item.name}</h3>
+            <Link href={`/dashboard/sites/${siteId}/goals/${item.id}`}>詳細と施策候補</Link>
+          </div>
           <dl className="detail-grid">
             <div><dt>指標</dt><dd>{metric ? goalMetrics[metric].label : item.metric}</dd></div>
             {item.subjectValue && <div><dt>{subject ? goalSubjects[subject] : "対象"}</dt><dd>{item.subjectValue}</dd></div>}

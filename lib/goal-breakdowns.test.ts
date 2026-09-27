@@ -170,17 +170,17 @@ describe("goal breakdown definitions", () => {
     // baselineは推定中央値。標準では同値になり、差分は出ない。
     const standard = requiredDriverValues("conversions", 10)
     expect(standard["cta-rate"].value).toBe(standard["cta-rate"].baseline)
-    expect(driverGapLabel(standard["cta-rate"].value, standard["cta-rate"].baseline, "%")).toBe("達成")
+    expect(driverGapLabel(standard["cta-rate"], undefined, "%")).toBe("前提どおり")
 
     const optimistic = requiredDriverValues("conversions", 10, null, {}, {}, null, null, {}, "optimistic")
     expect(optimistic["cta-rate"].value).toBeCloseTo(5)
     expect(optimistic["cta-rate"].baseline).toBeCloseTo(3)
-    expect(driverGapLabel(optimistic["cta-rate"].value, optimistic["cta-rate"].baseline, "%")).toBe("あと2%")
+    expect(driverGapLabel(optimistic["cta-rate"], undefined, "%")).toBe("あと2%")
   })
 
   it("keeps a measured rate from inventing a shortfall in the standard scenario", () => {
     const required = requiredDriverValues("conversions", 10, null, { "cta-rate": { successes: 10, trials: 1000 } })
-    expect(driverGapLabel(required["cta-rate"].value, required["cta-rate"].baseline, "%")).toBe("達成")
+    expect(driverGapLabel(required["cta-rate"], undefined, "%")).toBe("前提どおり")
   })
 
   it("scales the advertising RPM target with the scenario", () => {
@@ -202,10 +202,16 @@ describe("goal breakdown definitions", () => {
     // 率は標準シナリオでは「その水準が続く前提」。差分を出すと、逆算に使った率と二重に手を打つことになる。
     const paid = requiredDriverValues("paidContracts", 10, null, { "free-cvr": { successes: 20, trials: 1000 } })
     for (const id of ["cta-rate", "free-cvr", "paid-rate"]) {
-      expect(driverGapLabel(paid[id].value, paid[id].baseline, "%")).toBe("達成")
+      expect(driverGapLabel(paid[id], undefined, "%")).toBe("前提どおり")
     }
     const ads = requiredDriverValues("adRevenue", 100000, "entertainment")
-    expect(driverGapLabel(ads["page-rpm"].value, ads["page-rpm"].baseline, "円/1,000PV")).toBe("達成")
+    expect(driverGapLabel(ads["page-rpm"], undefined, "円/1,000PV")).toBe("前提どおり")
+  })
+
+  it("does not contradict a measured rate that sits below the assumption", () => {
+    // 実測0%でも、標準シナリオは率を動かすことを求めていない。「達成」と出すと現在値と矛盾する。
+    const required = requiredDriverValues("conversions", 10, null, { "cta-cvr": { successes: 0, trials: 6 } })
+    expect(driverGapLabel(required["cta-cvr"], 0, "%")).toBe("前提どおり")
   })
 
   it("matches the standard scenario even when measured rates move it", () => {
@@ -261,17 +267,17 @@ describe("goal breakdown definitions", () => {
   })
 
   it("states the gap between a measured driver and what the goal needs", () => {
-    expect(driverGapLabel(1000, 250, "セッション/月")).toBe("あと750セッション")
-    expect(driverGapLabel(1000, 1000, "セッション/月")).toBe("達成")
-    expect(driverGapLabel(1000, 1200, "セッション/月")).toBe("達成")
-    expect(driverGapLabel(400, 250, "円/1,000PV")).toBe("あと150円/1,000PV")
-    expect(driverGapLabel(3, 1.2, "%")).toBe("あと1.8%")
+    expect(driverGapLabel({ value: 1000 }, 250, "セッション/月")).toBe("あと750セッション")
+    expect(driverGapLabel({ value: 1000 }, 1000, "セッション/月")).toBe("達成")
+    expect(driverGapLabel({ value: 1000 }, 1200, "セッション/月")).toBe("達成")
+    expect(driverGapLabel({ value: 400 }, 250, "円/1,000PV")).toBe("あと150円/1,000PV")
+    expect(driverGapLabel({ value: 3 }, 1.2, "%")).toBe("あと1.8%")
   })
 
   it("treats a shortfall that rounds to zero as reached", () => {
-    expect(driverGapLabel(2.7119717, 2.71, "%")).toBe("達成")
-    expect(driverGapLabel(1000.004, 1000, "セッション/月")).toBe("達成")
-    expect(driverGapLabel(1000.02, 1000, "セッション/月")).toBe("あと0.02セッション")
+    expect(driverGapLabel({ value: 2.7119717 }, 2.71, "%")).toBe("達成")
+    expect(driverGapLabel({ value: 1000.004 }, 1000, "セッション/月")).toBe("達成")
+    expect(driverGapLabel({ value: 1000.02 }, 1000, "セッション/月")).toBe("あと0.02セッション")
   })
 
   it("keeps assumptions out of the measured amounts", () => {
@@ -283,8 +289,8 @@ describe("goal breakdown definitions", () => {
   })
 
   it("states no gap without a measured value", () => {
-    expect(driverGapLabel(1000, undefined, "セッション/月")).toBeNull()
-    expect(driverGapLabel(1000, Number.NaN, "セッション/月")).toBeNull()
+    expect(driverGapLabel({ value: 1000 }, undefined, "セッション/月")).toBeNull()
+    expect(driverGapLabel({ value: 1000 }, Number.NaN, "セッション/月")).toBeNull()
   })
 
   it("rejects inherited object properties as site categories", () => {

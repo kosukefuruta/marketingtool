@@ -274,14 +274,27 @@ export function measuredDriverAmounts(currentValues: Record<string, DriverValue>
     .flatMap(([id, value]) => value.assumed || value.amount === undefined ? [] : [[id, value.amount] as const]))
 }
 
-/** ドライバーの差分。達成済みなら「達成」、実測が無ければnull。 */
-export function driverGapLabel(required: number, current: number | undefined, unit: string): string | null {
-  if (current === undefined || !Number.isFinite(current)) return null
-  // 表示桁で0に丸まる不足は「あと0」ではなく達成として扱う。
-  const gap = Math.round((required - current) * 100) / 100
-  if (gap <= 0) return "達成"
+/**
+ * ドライバーの差分。
+ *
+ * 率（baselineを持つ）は、選んだシナリオが現在の推定水準より上を求めるときだけ不足を出す。
+ * 標準シナリオでは必要値と推定中央値が一致するため「前提どおり」になる。ここで実測の生値と
+ * 比べると、観測の揺れが不足として出るうえ、逆算に使った率と二重に手を打つことになる。
+ *
+ * 量（baselineを持たない）は実測と比べる。実測が無ければnull。
+ */
+export function driverGapLabel(required: DriverTarget, current: number | undefined, unit: string): string | null {
   const gapUnit = unit.endsWith("/月") ? unit.slice(0, -2) : unit
-  return `あと${formatDriverAmount(gap, gapUnit)}`
+  // 表示桁で0に丸まる不足は「あと0」として出さない。
+  const round = (value: number) => Math.round(value * 100) / 100
+
+  if (required.baseline !== undefined) {
+    const needed = round(required.value - required.baseline)
+    return needed <= 0 ? "前提どおり" : `あと${formatDriverAmount(needed, gapUnit)}`
+  }
+  if (current === undefined || !Number.isFinite(current)) return null
+  const gap = round(required.value - current)
+  return gap <= 0 ? "達成" : `あと${formatDriverAmount(gap, gapUnit)}`
 }
 
 export function buildGoalScenarios(metric: GoalMetric, target: number, category?: SiteCategory | null, observations: Record<string, RateObservation> = {}, numericObservations: Record<string, NumericObservation> = {}, manualPageRpmRevenue?: number | null, manualPageRpmPageviews?: number | null): GoalScenario[] {
