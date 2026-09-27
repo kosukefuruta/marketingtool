@@ -7,11 +7,11 @@ export const DEMAND_QUERY_LIMIT = 50
 export type KeywordDemand = SearchQueryMetric & {
   volume: number | null
   /**
-   * 需要のうち、実際に検索結果へ表示された割合の目安。順位が低いほど小さくなる。
+   * 月間検索数に対する表示回数の割合。順位が低いほど小さくなる。
    * 実績は直近28日、ボリュームは月平均なので、実績を30日相当へ換算して比べる。
-   * 国・端末の条件が揃わないため100%を超えることがあり、厳密なシェアではない。
+   * 検索数は過去12か月の平均であり、国・端末の条件も揃わないため100%を超えることがある。
    */
-  impressionShare: number | null
+  impressionRate: number | null
 }
 
 /** Search Consoleの取得期間（日）。docs上の28日窓に合わせる。 */
@@ -36,7 +36,7 @@ export function mergeVolumes(queries: SearchQueryMetric[], volumes: SearchVolume
       return {
         ...query,
         volume,
-        impressionShare: volume !== null && volume > 0 ? monthlyImpressions / volume * 100 : null,
+        impressionRate: volume !== null && volume > 0 ? monthlyImpressions / volume * 100 : null,
       }
     })
     .sort((left, right) => (right.volume ?? -1) - (left.volume ?? -1))
