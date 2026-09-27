@@ -9,8 +9,9 @@ type DriverProps = {
 function Driver({ driver, currentValues, requirements }: DriverProps) {
   const current = currentValues[driver.id]
   const required = requirements[driver.id]
-  // 仮定値との差は差分ではないので、実測があるときだけ不足量を出す。
-  const gap = required ? driverGapLabel(required.value, current?.assumed ? undefined : current?.amount, driver.unit) : null
+  // 率はシナリオ間の差を見たいので推定中央値を基準にする。量は実測があるときだけ差分を出す。
+  const currentForGap = required?.baseline ?? (current?.assumed ? undefined : current?.amount)
+  const gap = required ? driverGapLabel(required.value, currentForGap, driver.unit) : null
   return <li className="goal-driver">
     <div className="goal-driver-card">
       <div>

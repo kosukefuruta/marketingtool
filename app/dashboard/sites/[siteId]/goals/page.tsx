@@ -139,7 +139,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
           {breakdown ? <div className="stack">
             <div><h4>目標のブレークダウン</h4><p className="goal-formula">{breakdown.formula}</p>
               {comparison.comparable
-                ? comparison.note && <p className="muted">必要値との差分も{comparison.note}</p>
+                ? comparison.note && <p className="muted">必要値は標準シナリオのもので、差分も{comparison.note}</p>
                 : <p className="muted">{comparison.reason}必要値との差分は表示していません。</p>}
             </div>
             <GoalDriverTree drivers={breakdown.drivers} currentValues={currentValues} requirements={requirements} />
