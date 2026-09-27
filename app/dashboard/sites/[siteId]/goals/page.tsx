@@ -67,7 +67,7 @@ export default async function SiteGoalsPage({ params }: { params: Promise<{ site
     ])
     if (actualResult.status === "fulfilled") actuals = actualResult.value
     else {
-      actuals = { values: {}, keywordValues: {}, observations: {}, goalValues: {}, goalObservations: {}, numericObservations: {}, errors: ["Googleの実測値を取得できませんでした。"], period: "" }
+      actuals = { values: {}, keywordValues: {}, observations: {}, goalValues: {}, goalObservations: {}, numericObservations: {}, searchPages: [], errors: ["Googleの実測値を取得できませんでした。"], period: "" }
     }
     if (keyEventsResult.status === "fulfilled") availableKeyEvents = keyEventsResult.value
     else {
