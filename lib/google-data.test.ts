@@ -29,7 +29,7 @@ describe("Google goal metrics", () => {
     expect(result.errors).toEqual([])
 
     await loadGoogleGoalMetrics("empty-account", new Headers(), "sc-domain:example.com", null, ["keyword"])
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it("reports a measured CTR once impressions exist", async () => {
@@ -42,13 +42,35 @@ describe("Google goal metrics", () => {
   })
 
   it("keeps successful keyword data when the aggregate request fails", async () => {
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(jsonResponse({}, 500))
-      .mockResolvedValueOnce(jsonResponse({ rows: [{ position: 4.2, impressions: 100, clicks: 10, ctr: 0.1 }] }))
+    // 集計リクエストだけを失敗させる。並行実行なので本文で振り分ける。
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const body = String(init?.body ?? "")
+      if (body.includes('"dimensions":["query"]')) return jsonResponse({ rows: [{ position: 4.2, impressions: 100, clicks: 10, ctr: 0.1 }] })
+      if (body.includes('"dimensions":["page"]')) return jsonResponse({})
+      return jsonResponse({}, 500)
+    })
 
     const result = await loadGoogleGoalMetrics("partial-account", new Headers(), "sc-domain:example.com", null, ["keyword"])
     expect(result.keywordValues.keyword?.value).toBe("4.2位")
     expect(result.errors).toHaveLength(1)
+  })
+
+  it("collects per-page search metrics", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (!String(init?.body ?? "").includes('"dimensions":["page"]')) return jsonResponse({})
+      return jsonResponse({ rows: [
+        { keys: ["https://example.com/a"], clicks: 18, impressions: 1200, ctr: 0.015, position: 12.3 },
+        { keys: ["https://example.com/b"], clicks: 0, impressions: 40, ctr: 0, position: 34.1 },
+        { keys: ["https://example.com/c"], clicks: 5, impressions: 90 },
+      ] })
+    })
+    const result = await loadGoogleGoalMetrics("pages-account", new Headers(), "sc-domain:pages.example.com", null)
+
+    expect(result.searchPages).toEqual([
+      { page: "https://example.com/a", impressions: 1200, clicks: 18, ctr: 1.5, position: 12.3 },
+      { page: "https://example.com/b", impressions: 40, clicks: 0, ctr: 0, position: 34.1 },
+    ])
+    expect(result.errors).toEqual([])
   })
 
   it("does not share a cache entry between complete and truncated keyword requests", async () => {
@@ -60,13 +82,13 @@ describe("Google goal metrics", () => {
 
     expect(complete.errors).toEqual([])
     expect(truncated.errors).toContain("順位を取得できる対象キーワードは先頭20件までです。")
-    expect(fetchMock).toHaveBeenCalledTimes(42)
+    expect(fetchMock).toHaveBeenCalledTimes(44)
   })
 
   it("maps directly measurable goal metrics to their current values", () => {
     const metrics: GoogleGoalMetrics = {
       values: { "organic-sessions": { value: "123セッション" }, "ad-revenue": { value: "456円" } },
-      keywordValues: {}, observations: {}, goalValues: {}, goalObservations: {}, numericObservations: {}, errors: [], period: "test",
+      keywordValues: {}, observations: {}, goalValues: {}, goalObservations: {}, numericObservations: {}, searchPages: [], errors: [], period: "test",
     }
     expect(googleValueForGoal("organicSessions", metrics)?.value).toBe("123セッション")
     expect(googleValueForGoal("adRevenue", metrics)?.value).toBe("456円")

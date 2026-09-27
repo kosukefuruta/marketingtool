@@ -2,6 +2,7 @@ import { and, asc, eq } from "drizzle-orm"
 import { headers } from "next/headers"
 import Link from "next/link"
 import { notFound } from "next/navigation"
+import { ActionCandidates } from "@/components/action-candidates"
 import { GoalDriverTree } from "@/components/goal-driver-tree"
 import { GoalEditForm } from "@/components/goal-edit-form"
 import { GoalCtaPageForm } from "@/components/goal-cta-page-form"
@@ -15,6 +16,7 @@ import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type An
 import { groupGoalKeyEvents, keyEventStagesForMetric } from "@/lib/goal-key-events"
 import { assumedDriverValues, buildGoalScenarios, getGoalBreakdown, isScenarioId, measuredDriverAmounts, requiredDriverValues, type DriverValue, type ScenarioId } from "@/lib/goal-breakdowns"
 import { formatGoalValue, goalMetrics, isGoalMetric } from "@/lib/goals"
+import { rankImprovementCandidates } from "@/lib/action-candidates"
 import { goalPeriodComparison, goalProgress } from "@/lib/goal-progress"
 import { requireSession } from "@/lib/session"
 import { isSiteCategory, siteCategories } from "@/lib/site-categories"
@@ -69,7 +71,7 @@ export default async function GoalDetailPage({ params, searchParams }: { params:
     ])
     if (actualResult.status === "fulfilled") actuals = actualResult.value
     else {
-      actuals = { values: {}, keywordValues: {}, observations: {}, goalValues: {}, goalObservations: {}, numericObservations: {}, errors: ["Googleの実測値を取得できませんでした。"], period: "" }
+      actuals = { values: {}, keywordValues: {}, observations: {}, goalValues: {}, goalObservations: {}, numericObservations: {}, searchPages: [], errors: ["Googleの実測値を取得できませんでした。"], period: "" }
     }
     if (keyEventsResult.status === "fulfilled") availableKeyEvents = keyEventsResult.value
     else {
@@ -90,6 +92,8 @@ export default async function GoalDetailPage({ params, searchParams }: { params:
   const keywordActual = item.metric === "averagePosition" && item.subjectValue ? actuals?.keywordValues[item.subjectValue] : null
   const currentActual = keywordActual ?? actuals?.goalValues[item.id]?.["goal-total"] ?? googleValueForGoal(item.metric, actuals)
   const measuredAmounts = measuredDriverAmounts(currentValues)
+  // 検索表示回数に差分があるときだけ、その差分を埋める施策候補を出す。
+  const rankCandidates = rankImprovementCandidates(actuals?.searchPages ?? [])
   const comparison = goalPeriodComparison(item.period)
   // 実測はGoogleの直近28日分なので、最終目標と同じ期間の判定に従う。
   const requirements = comparison.comparable
@@ -131,6 +135,11 @@ export default async function GoalDetailPage({ params, searchParams }: { params:
       <GoalDriverTree drivers={breakdown.drivers} currentValues={currentValues} requirements={requirements} />
       <p className="muted">各データ元を連携すると現在値を取得し、目標達成に必要な値と優先する施策を計算します。</p>
     </section> : <section className="card"><h2>目標のブレークダウン</h2><p className="muted">この指標のブレークダウンはまだ定義されていません。</p></section>}
+    {rankCandidates.length > 0 && <section className="card stack">
+      <div><h2>差分を埋める施策候補</h2><p className="muted">検索表示回数を増やすための候補です。1ページ目の手前にあり、表示回数が多い順に並べています。</p></div>
+      <ActionCandidates candidates={rankCandidates} />
+      <p className="muted">実測データで条件を確認できた候補だけを表示しています。</p>
+    </section>}
     {scenarios.length > 0 && <section className="card stack">
       <div><h2>達成シナリオ</h2><p className="muted">CTA関連は計測設定ができるまで初期仮定を使います。取得できた割合やページRPMは、データ量に応じて実測へ補正します。</p></div>
       {category && item.metric === "adRevenue" && <p>サイトジャンル: <strong>{siteCategories[category].label}</strong></p>}

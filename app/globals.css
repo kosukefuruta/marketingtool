@@ -65,6 +65,10 @@ button { cursor: pointer; }
 .goal-progress-track { height: 8px; border-radius: 999px; background: #eaecf0; overflow: hidden; }
 .goal-progress-fill { height: 100%; border-radius: 999px; background: var(--brand); }
 .goal-progress-achieved .goal-progress-fill { background: #12805c; }
+.action-candidates { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.action-candidate { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr); gap: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; }
+.action-candidate p { margin: 4px 0 0; font-size: 14px; }
+.action-candidate-page { overflow-wrap: anywhere; }
 .scenario-picker { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; margin-top: 12px; }
 .scenario-picker strong { padding: 4px 12px; border-radius: 999px; background: var(--brand); color: #fff; }
 .scenario-picker a { padding: 4px 12px; border-radius: 999px; background: #f2f4f7; text-decoration: none; }
@@ -125,4 +129,4 @@ button { cursor: pointer; }
 .report code { padding: 2px 5px; border-radius: 4px; background: #f2f4f7; }
 .footer { border-top: 1px solid var(--line); padding: 28px 0; color: var(--muted); font-size: 14px; }
 @media (max-width: 700px) { .scenario-grid { grid-template-columns: 1fr; } }
-@media (max-width: 560px) { .nav { align-items: flex-start; padding: 14px 0; } .nav-links { flex-wrap: wrap; justify-content: flex-end; } .brand small { display: none; } .main { padding-top: 24px; } .card { padding: 18px; } .detail-grid { grid-template-columns: 1fr 1fr; } .goal-driver-card { grid-template-columns: 1fr; } .goal-driver-card dl { grid-template-columns: 1fr; } .goal-driver-tree ul { margin-left: 8px; padding-left: 12px; } }
+@media (max-width: 560px) { .action-candidate { grid-template-columns: 1fr; } .nav { align-items: flex-start; padding: 14px 0; } .nav-links { flex-wrap: wrap; justify-content: flex-end; } .brand small { display: none; } .main { padding-top: 24px; } .card { padding: 18px; } .detail-grid { grid-template-columns: 1fr 1fr; } .goal-driver-card { grid-template-columns: 1fr; } .goal-driver-card dl { grid-template-columns: 1fr; } .goal-driver-tree ul { margin-left: 8px; padding-left: 12px; } }
