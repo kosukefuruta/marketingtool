@@ -116,6 +116,8 @@ export const siteKeyword = pgTable("site_keyword", {
   keyword: text("keyword").notNull(),
   normalizedKeyword: text("normalized_keyword").notNull(),
   pagePath: text("page_path"),
+  // 一覧をまとめて見るための区分（例: 狙うトピック）。
+  groupName: text("group_name"),
   memo: text("memo"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
@@ -131,6 +133,7 @@ export const sitePage = pgTable("site_page", {
   path: text("path").notNull(),
   publishedAt: timestamp("published_at", { withTimezone: true }),
   modifiedAt: timestamp("modified_at", { withTimezone: true }),
+  title: text("title"),
   datesFetchedAt: timestamp("dates_fetched_at", { withTimezone: true }),
   datesError: text("dates_error"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),

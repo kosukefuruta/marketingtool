@@ -1,6 +1,7 @@
 export type PageDates = {
   publishedAt: Date | null
   modifiedAt: Date | null
+  title: string | null
 }
 
 const ARTICLE_TYPES = new Set(["article", "newsarticle", "blogposting", "techarticle", "report", "webpage", "faqpage", "howto"])
@@ -62,7 +63,16 @@ export function extractPageDates(html: string): PageDates {
   const best = candidates.find((item) => item.preferred) ?? candidates[0]
   const publishedAt = best?.publishedAt ?? toDate(metaContent(html, ["article:published_time", "datepublished", "og:published_time"]))
   const modifiedAt = best?.modifiedAt ?? toDate(metaContent(html, ["article:modified_time", "datemodified", "og:updated_time"]))
-  return { publishedAt, modifiedAt }
+  return { publishedAt, modifiedAt, title: extractTitle(html) }
+}
+
+const TITLE_LENGTH_LIMIT = 300
+
+// 記事のタイトル。<title> を優先し、無ければ og:title を読む。
+export function extractTitle(html: string): string | null {
+  const raw = html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? metaContent(html, ["og:title"])
+  const title = raw ? decodeEntities(raw).replace(/\s+/g, " ").trim() : ""
+  return title ? title.slice(0, TITLE_LENGTH_LIMIT) : null
 }
 
 export class PageDatesError extends Error {}

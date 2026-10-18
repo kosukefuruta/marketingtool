@@ -19,10 +19,10 @@ describe("parseKeywordAssignments", () => {
     ].join("\n"), origin)
     expect(result.error).toBeUndefined()
     expect(result.items).toEqual([
-      { keyword: "youtube 収益化 条件", normalizedKeyword: "youtube 収益化 条件", pagePath: "/guides/a/" },
-      { keyword: "youtube 収益化 昔", normalizedKeyword: "youtube 収益化 昔", pagePath: "/guides/b/" },
-      { keyword: "youtube 収益化 審査", normalizedKeyword: "youtube 収益化 審査", pagePath: "/guides/c/" },
-      { keyword: "youtube スパチャ", normalizedKeyword: "youtube スパチャ", pagePath: null },
+      { keyword: "youtube 収益化 条件", normalizedKeyword: "youtube 収益化 条件", pagePath: "/guides/a/", groupName: null },
+      { keyword: "youtube 収益化 昔", normalizedKeyword: "youtube 収益化 昔", pagePath: "/guides/b/", groupName: null },
+      { keyword: "youtube 収益化 審査", normalizedKeyword: "youtube 収益化 審査", pagePath: "/guides/c/", groupName: null },
+      { keyword: "youtube スパチャ", normalizedKeyword: "youtube スパチャ", pagePath: null, groupName: null },
     ])
   })
 
@@ -30,6 +30,18 @@ describe("parseKeywordAssignments", () => {
     const result = parseKeywordAssignments("youtube 収益化\nYouTube　収益化\t/guides/a/", origin)
     expect(result.items).toHaveLength(1)
     expect(result.items[0].pagePath).toBe("/guides/a/")
+  })
+
+  it("タブ区切りの3列目をグループとして読む", () => {
+    const result = parseKeywordAssignments("youtube 収益化\t/guides/a/\tYouTube収益化\nグッズ制作\t\t グッズ 制作 ", origin)
+    expect(result.items.map((item) => [item.normalizedKeyword, item.pagePath, item.groupName])).toEqual([
+      ["youtube 収益化", "/guides/a/", "YouTube収益化"],
+      ["グッズ制作", null, "グッズ 制作"],
+    ])
+  })
+
+  it("グループ名が長すぎれば受け付けない", () => {
+    expect(parseKeywordAssignments(`a\t\t${"x".repeat(51)}`, origin).error).toContain("グループ名")
   })
 
   it("別サイトのURLは受け付けない", () => {

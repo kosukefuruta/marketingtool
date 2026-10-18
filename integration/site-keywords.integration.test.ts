@@ -72,6 +72,25 @@ if (!enabled) {
     ])
   })
 
+  it("stores the group and keeps it when re-registered without one", async () => {
+    await saveSiteKeywords({}, form({ siteId: "s1", keywords: "youtube 収益化 条件\t/guides/a/\tYouTube収益化\nグッズ制作\t\tグッズ制作" }))
+    await saveSiteKeywords({}, form({ siteId: "s1", keywords: "youtube 収益化 条件\t/guides/b/" }))
+
+    const keywords = await db.select().from(siteKeyword).orderBy(asc(siteKeyword.normalizedKeyword))
+    expect(keywords.map((row) => [row.normalizedKeyword, row.pagePath, row.groupName])).toEqual([
+      ["youtube 収益化 条件", "/guides/b/", "YouTube収益化"],
+      ["グッズ制作", null, "グッズ制作"],
+    ])
+    const [page] = await db.select().from(sitePage).where(eq(sitePage.path, "/guides/b/"))
+    expect(page.publishedAt?.toISOString()).toBe("2026-09-20T00:00:00.000Z")
+
+    const id = keywords[0].id
+    const result = await updateSiteKeyword({}, form({ siteId: "s1", keywordId: id, pageUrl: "/guides/b/", groupName: "  ", memo: "" }))
+    expect(result.error).toBeUndefined()
+    const [updated] = await db.select().from(siteKeyword).where(eq(siteKeyword.id, id))
+    expect(updated.groupName).toBeNull()
+  })
+
   it("does not let another user edit the site", async () => {
     mocks.session.userId = "u2"
     const result = await saveSiteKeywords({}, form({ siteId: "s1", keywords: "youtube 収益化" }))

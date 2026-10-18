@@ -1,8 +1,9 @@
 export const SITE_KEYWORD_LIMIT = 2_000
 export const KEYWORD_INPUT_LINE_LIMIT = 1_000
 const KEYWORD_LENGTH_LIMIT = 200
+export const GROUP_NAME_LENGTH_LIMIT = 50
 const PAGE_URL_LENGTH_LIMIT = 2_048
-const KEYWORD_INPUT_LIMIT = KEYWORD_INPUT_LINE_LIMIT * (KEYWORD_LENGTH_LIMIT + PAGE_URL_LENGTH_LIMIT + 2)
+const KEYWORD_INPUT_LIMIT = KEYWORD_INPUT_LINE_LIMIT * (KEYWORD_LENGTH_LIMIT + PAGE_URL_LENGTH_LIMIT + GROUP_NAME_LENGTH_LIMIT + 3)
 
 // 公開直後は一時的に上位へ出ることがあるため、この日数を過ぎるまでを「テスト期間」として分けて見る。
 // 既定値はサイト運営者の経験による。サイトごとに変えられる。
@@ -14,6 +15,7 @@ export type KeywordAssignmentInput = {
   keyword: string
   normalizedKeyword: string
   pagePath: string | null
+  groupName: string | null
 }
 
 // Search Console のクエリと突き合わせられるよう、全角・半角と大文字小文字、空白の揺れをそろえる。
@@ -41,17 +43,21 @@ export function parsePagePath(value: string, siteOrigin: string): { path: string
   return { path: url.pathname || "/" }
 }
 
-function splitLine(line: string): { keyword: string; url: string | null } {
-  if (line.includes("\t")) {
-    const [keyword, url] = line.split("\t")
-    return { keyword: keyword.trim(), url: url?.trim() || null }
-  }
-  const match = line.match(/^(.*?)[\s,]+((?:https?:\/\/|\/)\S*)$/)
-  if (match) return { keyword: match[1].replace(/,$/, "").trim(), url: match[2] }
-  return { keyword: line.trim(), url: null }
+export function normalizeGroupName(value: string): string | null {
+  return value.replace(/\s+/g, " ").trim() || null
 }
 
-// 1行に1キーワード。記事のURLは、タブ区切りか行末に書く（省略可）。
+function splitLine(line: string): { keyword: string; url: string | null; group: string | null } {
+  if (line.includes("\t")) {
+    const [keyword, url, group] = line.split("\t")
+    return { keyword: keyword.trim(), url: url?.trim() || null, group: normalizeGroupName(group ?? "") }
+  }
+  const match = line.match(/^(.*?)[\s,]+((?:https?:\/\/|\/)\S*)$/)
+  if (match) return { keyword: match[1].replace(/,$/, "").trim(), url: match[2], group: null }
+  return { keyword: line.trim(), url: null, group: null }
+}
+
+// 1行に1キーワード。記事のURLは、タブ区切りか行末に書く（省略可）。グループはタブ区切りの3列目に書く（省略可）。
 export function parseKeywordAssignments(input: string, siteOrigin: string): { items: KeywordAssignmentInput[]; error?: string } {
   if (input.length > KEYWORD_INPUT_LIMIT) return { items: [], error: "入力が長すぎます。" }
   const lines = input.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
@@ -59,8 +65,9 @@ export function parseKeywordAssignments(input: string, siteOrigin: string): { it
 
   const byKeyword = new Map<string, KeywordAssignmentInput>()
   for (const line of lines) {
-    const { keyword, url } = splitLine(line)
+    const { keyword, url, group } = splitLine(line)
     if (!keyword) continue
+    if (group && group.length > GROUP_NAME_LENGTH_LIMIT) return { items: [], error: `グループ名は${GROUP_NAME_LENGTH_LIMIT}文字以内で入力してください: ${group.slice(0, 40)}…` }
     if (keyword.length > KEYWORD_LENGTH_LIMIT) return { items: [], error: `キーワードは${KEYWORD_LENGTH_LIMIT}文字以内で入力してください: ${keyword.slice(0, 40)}…` }
     let pagePath: string | null = null
     if (url) {
@@ -70,8 +77,13 @@ export function parseKeywordAssignments(input: string, siteOrigin: string): { it
     }
     const normalizedKeyword = normalizeKeyword(keyword)
     const existing = byKeyword.get(normalizedKeyword)
-    // 同じキーワードが2回出たら、URLのあるほうを残す。
-    if (!existing || (!existing.pagePath && pagePath)) byKeyword.set(normalizedKeyword, { keyword: keyword.replace(/\s+/g, " "), normalizedKeyword, pagePath })
+    // 同じキーワードが2回出たら、URLとグループは書いてあるほうを残す。
+    byKeyword.set(normalizedKeyword, {
+      keyword: existing?.keyword ?? keyword.replace(/\s+/g, " "),
+      normalizedKeyword,
+      pagePath: existing?.pagePath && !pagePath ? existing.pagePath : pagePath ?? existing?.pagePath ?? null,
+      groupName: group ?? existing?.groupName ?? null,
+    })
   }
   return { items: [...byKeyword.values()] }
 }
