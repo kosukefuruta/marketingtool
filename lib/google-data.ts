@@ -419,3 +419,48 @@ export async function loadGoogleKeyEvents(providerAccountId: string, requestHead
   keyEventsCache.set(cacheKey, { expiresAt: Date.now() + (result.length > 0 ? GOAL_METRICS_CACHE_MS : EMPTY_KEY_EVENTS_CACHE_MS), data: result })
   return result
 }
+
+const KEYWORD_ROWS_PAGE_SIZE = 25_000
+const KEYWORD_ROWS_MAX_PAGES = 4
+const KEYWORD_ROWS_CACHE_TTL_MS = 15 * 60 * 1000
+const KEYWORD_ROWS_CACHE_MAX_ENTRIES = 50
+const keywordRowsCache = new Map<string, { expiresAt: number; rows: SearchKeywordRow[] }>()
+
+export type SearchKeywordRow = { query: string; page: string; date: string; clicks: number; impressions: number; position: number }
+
+/** 対象キーワードに一致するクエリの、ページ×日付の行。正規表現は keywordRegexChunks で作る。 */
+export async function loadKeywordSearchRows(providerAccountId: string, requestHeaders: Headers, searchConsoleProperty: string, regexChunks: string[], startDate: string, endDate: string): Promise<SearchKeywordRow[]> {
+  if (regexChunks.length === 0 || startDate > endDate) return []
+  const cacheKey = `${providerAccountId}\n${searchConsoleProperty}\n${startDate}\n${endDate}\n${regexChunks.join("\n")}`
+  const now = Date.now()
+  for (const [key, entry] of keywordRowsCache) if (entry.expiresAt <= now) keywordRowsCache.delete(key)
+  const cached = keywordRowsCache.get(cacheKey)
+  if (cached) return cached.rows
+
+  const token = await auth.api.getAccessToken({ body: { providerId: "google", accountId: providerAccountId }, headers: requestHeaders })
+  const rows: SearchKeywordRow[] = []
+  for (const expression of regexChunks) {
+    for (let page = 0; page < KEYWORD_ROWS_MAX_PAGES; page += 1) {
+      const report = await googleJson<{ rows?: Array<{ keys?: string[]; clicks?: number; impressions?: number; position?: number }> }>(
+        `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(searchConsoleProperty)}/searchAnalytics/query`, token.accessToken,
+        { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+          startDate, endDate, dimensions: ["query", "page", "date"], rowLimit: KEYWORD_ROWS_PAGE_SIZE, startRow: page * KEYWORD_ROWS_PAGE_SIZE,
+          dimensionFilterGroups: [{ filters: [{ dimension: "query", operator: "includingRegex", expression }] }],
+        }) },
+      )
+      for (const row of report.rows ?? []) {
+        const [query, pageUrl, date] = row.keys ?? []
+        if (!query || !pageUrl || !date || row.position === undefined) continue
+        rows.push({ query, page: pageUrl, date, clicks: row.clicks ?? 0, impressions: row.impressions ?? 0, position: row.position })
+      }
+      if ((report.rows?.length ?? 0) < KEYWORD_ROWS_PAGE_SIZE) break
+    }
+  }
+  while (keywordRowsCache.size >= KEYWORD_ROWS_CACHE_MAX_ENTRIES) {
+    const oldestKey = keywordRowsCache.keys().next().value
+    if (oldestKey === undefined) break
+    keywordRowsCache.delete(oldestKey)
+  }
+  keywordRowsCache.set(cacheKey, { expiresAt: now + KEYWORD_ROWS_CACHE_TTL_MS, rows })
+  return rows
+}

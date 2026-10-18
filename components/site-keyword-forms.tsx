@@ -1,7 +1,7 @@
 "use client"
 
 import { useActionState, useEffect, useRef } from "react"
-import { deleteSiteKeyword, refreshSiteKeywordPageDates, saveSiteKeywords, updateSiteKeyword, type SiteKeywordFormState } from "@/app/actions"
+import { deleteSiteKeyword, refreshSiteKeywordPageDates, saveKeywordTestPeriod, saveSiteKeywords, updateSiteKeyword, type SiteKeywordFormState } from "@/app/actions"
 
 export function SiteKeywordBulkForm({ siteId, siteOrigin }: { siteId: string; siteOrigin: string }) {
   const [state, action, pending] = useActionState<SiteKeywordFormState, FormData>(saveSiteKeywords, {})
@@ -68,4 +68,21 @@ export function SitePageDatesRefreshForm({ siteId }: { siteId: string }) {
     {state.error && <p className="error" role="alert">{state.error}</p>}
     {state.success && <p className="status" role="status">{state.success}</p>}
   </form>
+}
+
+export function KeywordTestPeriodForm({ siteId, days }: { siteId: string; days: number }) {
+  const [state, action, pending] = useActionState<SiteKeywordFormState, FormData>(saveKeywordTestPeriod, {})
+  return <details className="goal-inline-editor">
+    <summary>テスト期間を変更（いまは{days}日）</summary>
+    <form className="stack goal-inline-editor-content" action={action}>
+      <input type="hidden" name="siteId" value={siteId} />
+      <label className="field">公開日から何日目までをテスト期間とするか
+        <input name="testPeriodDays" type="number" min={1} max={90} defaultValue={days} />
+        <small className="muted">テスト期間中の数字も表示しますが、評価にはそれ以降の数字を使います。</small>
+      </label>
+      <div><button className="button secondary" disabled={pending}>{pending ? "保存中…" : "保存"}</button></div>
+      {state.error && <p className="error" role="alert">{state.error}</p>}
+      {state.success && <p className="status" role="status">{state.success}</p>}
+    </form>
+  </details>
 }
