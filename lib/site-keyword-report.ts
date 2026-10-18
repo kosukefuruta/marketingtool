@@ -82,8 +82,8 @@ export async function loadSiteKeywordReport(siteId: string, userId: string, requ
     try {
       const result = await fetchSearchVolumes(rows.map((row) => row.normalizedKeyword))
       volumes = new Map(result.map((item) => [keywordMatchKey(item.keyword), item.volume]))
-    } catch {
-      volumeError = "検索ボリュームを取得できませんでした。"
+    } catch (error) {
+      volumeError = `検索ボリュームを取得できませんでした。${error instanceof Error ? error.message : ""}`
     }
   }
 

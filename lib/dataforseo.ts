@@ -6,6 +6,8 @@
  */
 const BASE_URL = process.env.DATAFORSEO_BASE_URL ?? "https://api.dataforseo.com"
 const REQUEST_TIMEOUT_MS = 10_000
+// Google Ads の検索ボリューム（live）は、キーワード数によって10秒を超えることがある。
+const SEARCH_VOLUME_TIMEOUT_MS = 45_000
 const TASK_SUCCESS = 20000
 /** 日本・日本語。docs/dataforseo-research.md §7 */
 export const JAPAN_LOCATION_CODE = 2392
@@ -31,7 +33,7 @@ function credentials(): string {
 type TaskResponse<T> = { status_code?: number; status_message?: string; tasks?: Array<{ status_code?: number; status_message?: string; result?: T[] | null }> }
 
 /** タスク結果を平坦化して返す。HTTP 200でもタスク側が失敗することがあるため、両方を検査する。 */
-export async function dataForSeoPost<T>(path: string, payload: unknown[]): Promise<T[]> {
+export async function dataForSeoPost<T>(path: string, payload: unknown[], timeoutMs = REQUEST_TIMEOUT_MS): Promise<T[]> {
   // 設定の不足を接続エラーとして握り潰さないよう、送信前に組み立てる。
   const authorization = `Basic ${credentials()}`
   let response: Response
@@ -41,10 +43,11 @@ export async function dataForSeoPost<T>(path: string, payload: unknown[]): Promi
       headers: { authorization, "content-type": "application/json" },
       body: JSON.stringify(payload),
       cache: "no-store",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     })
-  } catch {
-    throw new DataForSeoError("DataForSEOへ接続できませんでした。")
+  } catch (error) {
+    const timedOut = error instanceof Error && error.name === "TimeoutError"
+    throw new DataForSeoError(timedOut ? `DataForSEOの応答が${timeoutMs / 1000}秒以内に返りませんでした。` : "DataForSEOへ接続できませんでした。")
   }
   if (!response.ok) throw new DataForSeoError(`DataForSEOから応答を取得できませんでした（${response.status}）。`)
 
@@ -127,7 +130,7 @@ export async function fetchSearchVolumes(
       keywords: batch,
       location_code: locationCode,
       language_code: languageCode,
-    }])
+    }], SEARCH_VOLUME_TIMEOUT_MS)
     const returned = new Set<string>()
     for (const row of rows) {
       if (!row.keyword) continue
