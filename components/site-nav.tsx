@@ -10,6 +10,7 @@ export function SiteNav({ siteId }: { siteId: string }) {
     { href: base, label: "概要", exact: true },
     { href: `${base}/audits`, label: "サイト診断" },
     { href: `${base}/goals`, label: "目標" },
+    { href: `${base}/keywords`, label: "キーワード" },
     { href: `${base}/settings`, label: "サイト設定" },
   ]
   return <nav className="site-menu" aria-label="サイトメニュー">

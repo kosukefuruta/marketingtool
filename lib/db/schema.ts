@@ -108,6 +108,37 @@ export const goalCtaPage = pgTable("goal_cta_page", {
   uniqueIndex("goal_cta_page_goal_path_unique").on(table.goalId, table.path),
 ])
 
+// サイトで狙うキーワード。1キーワードに記事を1本割り当てる（1記事に複数キーワード可）。
+export const siteKeyword = pgTable("site_keyword", {
+  id: text("id").primaryKey(),
+  siteId: text("site_id").notNull().references(() => site.id, { onDelete: "cascade" }),
+  keyword: text("keyword").notNull(),
+  normalizedKeyword: text("normalized_keyword").notNull(),
+  pagePath: text("page_path"),
+  memo: text("memo"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  index("site_keyword_site_id_idx").on(table.siteId),
+  uniqueIndex("site_keyword_site_keyword_unique").on(table.siteId, table.normalizedKeyword),
+])
+
+// 割り当てた記事の公開日・更新日。ページの構造化データや meta から読み取る。
+export const sitePage = pgTable("site_page", {
+  id: text("id").primaryKey(),
+  siteId: text("site_id").notNull().references(() => site.id, { onDelete: "cascade" }),
+  path: text("path").notNull(),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  modifiedAt: timestamp("modified_at", { withTimezone: true }),
+  datesFetchedAt: timestamp("dates_fetched_at", { withTimezone: true }),
+  datesError: text("dates_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  index("site_page_site_id_idx").on(table.siteId),
+  uniqueIndex("site_page_site_path_unique").on(table.siteId, table.path),
+])
+
 export const subscription = pgTable("subscription", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().unique().references(() => user.id, { onDelete: "cascade" }),
