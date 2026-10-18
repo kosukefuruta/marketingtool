@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { keywordRegexChunks, per30Days, performanceStartDate, summarizeKeywordPerformance, windowDays, type SearchKeywordRow } from "./keyword-performance"
+import { dailyKeywordMetrics, keywordRegexChunks, per30Days, performanceStartDate, summarizeKeywordPerformance, windowDays, type SearchKeywordRow } from "./keyword-performance"
 
 const row = (query: string, page: string, date: string, impressions: number, position: number, clicks = 0): SearchKeywordRow => ({ query, page, date, impressions, position, clicks })
 
@@ -90,5 +90,25 @@ describe("per30Days", () => {
   it("30日あたりに換算する", () => {
     expect(per30Days(9, 9)).toBe(30)
     expect(per30Days(9, 0)).toBeNull()
+  })
+})
+
+describe("dailyKeywordMetrics", () => {
+  it("割り当てた記事の行を日ごとにまとめ、テスト期間の日に印を付ける", () => {
+    const assignment = { normalizedKeyword: "youtube 収益化 昔", pagePath: "/guides/history/", publishedAt: new Date("2026-10-01T00:00:00Z") }
+    const result = dailyKeywordMetrics([
+      row("youtube 収益化 昔", "https://example.com/guides/history/", "2026-10-15", 10, 4, 1),
+      row("youtube収益化昔", "https://example.com/guides/history/", "2026-10-15", 30, 8),
+      row("youtube 収益化 昔", "https://example.com/guides/history/", "2026-10-14", 5, 2),
+      row("youtube 収益化 昔", "https://example.com/guides/other/", "2026-10-15", 99, 1),
+    ], assignment, 14)
+    expect(result).toEqual([
+      { date: "2026-10-14", impressions: 5, clicks: 0, position: 2, inTestPeriod: true },
+      { date: "2026-10-15", impressions: 40, clicks: 1, position: 7, inTestPeriod: false },
+    ])
+  })
+
+  it("記事が無ければ空", () => {
+    expect(dailyKeywordMetrics([], { normalizedKeyword: "a", pagePath: null, publishedAt: null }, 14)).toEqual([])
   })
 })

@@ -147,3 +147,26 @@ export function performanceStartDate(assignments: KeywordAssignment[], endDate: 
   const earliest = published.length > 0 ? new Date(Math.min(...published)) : earliestAllowed
   return earliest < earliestAllowed ? earliestAllowed : earliest
 }
+
+export type DailyMetrics = { date: string; impressions: number; clicks: number; position: number | null; inTestPeriod: boolean }
+
+// 割り当てた記事の日別の数字。空白だけが違うクエリは同じ日にまとめる。
+export function dailyKeywordMetrics(rows: SearchKeywordRow[], assignment: KeywordAssignment, testPeriodDays: number): DailyMetrics[] {
+  if (!assignment.pagePath) return []
+  const keyword = keywordMatchKey(assignment.normalizedKeyword)
+  const boundary = assignment.publishedAt ? dayStart(assignment.publishedAt) + testPeriodDays * DAY_MS : null
+  const byDate = new Map<string, Accumulator>()
+  for (const row of rows) {
+    if (keywordMatchKey(row.query) !== keyword || pathOf(row.page) !== assignment.pagePath) continue
+    const value = byDate.get(row.date) ?? { impressions: 0, clicks: 0, weightedPosition: 0 }
+    add(value, row)
+    byDate.set(row.date, value)
+  }
+  return [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => ({
+    date,
+    impressions: value.impressions,
+    clicks: value.clicks,
+    position: value.impressions ? value.weightedPosition / value.impressions : null,
+    inTestPeriod: boundary !== null && dayStart(date) < boundary,
+  }))
+}

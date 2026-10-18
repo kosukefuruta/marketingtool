@@ -37,6 +37,7 @@ export async function refreshSitePageDates(siteId: string, siteOrigin: string, o
       await db.update(sitePage).set({
         publishedAt: dates.publishedAt,
         modifiedAt: dates.modifiedAt,
+        title: dates.title,
         datesFetchedAt: now,
         datesError: dates.publishedAt || dates.modifiedAt ? null : "ページに公開日・更新日の記載が見つかりませんでした。",
         updatedAt: now,

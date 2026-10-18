@@ -13,9 +13,9 @@ export function SiteKeywordBulkForm({ siteId, siteOrigin }: { siteId: string; si
 
   return <form className="stack" action={action} ref={formRef}>
     <input type="hidden" name="siteId" value={siteId} />
-    <label className="field">狙うキーワード（1行に1つ。記事のURLはタブ区切りか行末に書く）
-      <textarea name="keywords" rows={6} placeholder={`youtube 収益化 条件\t${siteOrigin}/guides/youtube/\nyoutube スパチャ ${siteOrigin}/guides/super-chat/\nyoutube メンバーシップ`} />
-      <small className="muted">スプレッドシートの2列（キーワード・URL）をそのまま貼り付けられます。登録済みのキーワードを貼り直すと、URLを書いた行だけ割り当てを上書きします。</small>
+    <label className="field">狙うキーワード（1行に1つ。記事のURLはタブ区切りか行末に、グループはタブ区切りの3列目に書く）
+      <textarea name="keywords" rows={6} placeholder={`youtube 収益化 条件\t${siteOrigin}/guides/youtube/\tYouTube収益化\nyoutube スパチャ ${siteOrigin}/guides/super-chat/\nyoutube メンバーシップ`} />
+      <small className="muted">スプレッドシートの3列（キーワード・URL・グループ）をそのまま貼り付けられます。登録済みのキーワードを貼り直すと、URLやグループを書いた行だけ上書きします。</small>
     </label>
     <div><button className="button" disabled={pending}>{pending ? "登録中…（記事の日付も取得しています）" : "キーワードを登録"}</button></div>
     {state.error && <p className="error" role="alert">{state.error}</p>}
@@ -23,7 +23,7 @@ export function SiteKeywordBulkForm({ siteId, siteOrigin }: { siteId: string; si
   </form>
 }
 
-export function SiteKeywordEditor({ siteId, keywordId, keyword, pageUrl, memo }: { siteId: string; keywordId: string; keyword: string; pageUrl: string; memo: string }) {
+export function SiteKeywordEditor({ siteId, keywordId, keyword, pageUrl, groupName, memo, from }: { siteId: string; keywordId: string; keyword: string; pageUrl: string; groupName: string; memo: string; from?: "detail" }) {
   const [state, action, pending] = useActionState<SiteKeywordFormState, FormData>(updateSiteKeyword, {})
   const detailsRef = useRef<HTMLDetailsElement>(null)
 
@@ -40,6 +40,9 @@ export function SiteKeywordEditor({ siteId, keywordId, keyword, pageUrl, memo }:
         <label className="field">記事のURL（空にすると割り当てを外す）
           <input name="pageUrl" defaultValue={pageUrl} />
         </label>
+        <label className="field">グループ
+          <input name="groupName" defaultValue={groupName} maxLength={50} />
+        </label>
         <label className="field">メモ
           <textarea name="memo" rows={2} defaultValue={memo} />
         </label>
@@ -51,6 +54,7 @@ export function SiteKeywordEditor({ siteId, keywordId, keyword, pageUrl, memo }:
       }}>
         <input type="hidden" name="siteId" value={siteId} />
         <input type="hidden" name="keywordId" value={keywordId} />
+        {from && <input type="hidden" name="from" value={from} />}
         <button className="text-button" type="submit">このキーワードを削除</button>
       </form>
     </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { extractPageDates, fetchPageDates, PageDatesError } from "./page-dates"
+import { extractPageDates, extractTitle, fetchPageDates, PageDatesError } from "./page-dates"
 
 describe("extractPageDates", () => {
   it("JSON-LD の Article から公開日と更新日を読む", () => {
@@ -24,7 +24,16 @@ describe("extractPageDates", () => {
   })
 
   it("壊れた JSON-LD は読み飛ばし、日付が無ければ null を返す", () => {
-    expect(extractPageDates(`<script type="application/ld+json">{oops</script>`)).toEqual({ publishedAt: null, modifiedAt: null })
+    expect(extractPageDates(`<script type="application/ld+json">{oops</script>`)).toEqual({ publishedAt: null, modifiedAt: null, title: null })
+  })
+})
+
+describe("extractTitle", () => {
+  it("<title> を読み、空白をそろえて文字参照を戻す", () => {
+    expect(extractTitle("<title>\n  条件 &amp; 審査 | Site </title>")).toBe("条件 & 審査 | Site")
+  })
+  it("<title> が無ければ og:title を読む", () => {
+    expect(extractTitle(`<meta property="og:title" content="OGのタイトル">`)).toBe("OGのタイトル")
   })
 })
 

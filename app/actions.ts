@@ -6,7 +6,7 @@ import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { account, auditJob, goal, goalCtaPage, goalKeyEvent, site, siteKeyword, subscription, user } from "@/lib/db/schema"
-import { parseKeywordAssignments, parsePagePath, parseTestPeriodDays, SITE_KEYWORD_LIMIT, TEST_PERIOD_DAYS_MAX, TEST_PERIOD_DAYS_MIN } from "@/lib/site-keywords"
+import { GROUP_NAME_LENGTH_LIMIT, normalizeGroupName, parseKeywordAssignments, parsePagePath, parseTestPeriodDays, SITE_KEYWORD_LIMIT, TEST_PERIOD_DAYS_MAX, TEST_PERIOD_DAYS_MIN } from "@/lib/site-keywords"
 import { ensureSitePages, refreshSitePageDates } from "@/lib/site-page-store"
 import { parseCtaPagePaths } from "@/lib/goal-cta-pages"
 import { loadGoogleProperties } from "@/lib/google-data"
@@ -511,11 +511,11 @@ export async function saveSiteKeywords(_state: SiteKeywordFormState, formData: F
 
   const now = new Date()
   await db.insert(siteKeyword)
-    .values(parsed.items.map((item) => ({ id: crypto.randomUUID(), siteId, keyword: item.keyword, normalizedKeyword: item.normalizedKeyword, pagePath: item.pagePath, createdAt: now, updatedAt: now })))
+    .values(parsed.items.map((item) => ({ id: crypto.randomUUID(), siteId, keyword: item.keyword, normalizedKeyword: item.normalizedKeyword, pagePath: item.pagePath, groupName: item.groupName, createdAt: now, updatedAt: now })))
     .onConflictDoUpdate({
       target: [siteKeyword.siteId, siteKeyword.normalizedKeyword],
-      // URLを書かずに登録し直したときは、既存の割り当てを消さない。
-      set: { pagePath: sql`coalesce(excluded.page_path, ${siteKeyword.pagePath})`, updatedAt: now },
+      // URLやグループを書かずに登録し直したときは、既存の値を消さない。
+      set: { pagePath: sql`coalesce(excluded.page_path, ${siteKeyword.pagePath})`, groupName: sql`coalesce(excluded.group_name, ${siteKeyword.groupName})`, updatedAt: now },
     })
 
   const paths = parsed.items.flatMap((item) => item.pagePath ? [item.pagePath] : [])
@@ -535,20 +535,22 @@ export async function updateSiteKeyword(_state: SiteKeywordFormState, formData: 
   if (!origin || !keywordId) return { error: "キーワードが見つかりません。" }
   const rawUrl = String(formData.get("pageUrl") ?? "").trim()
   const memo = String(formData.get("memo") ?? "").trim().slice(0, 1_000) || null
+  const groupName = normalizeGroupName(String(formData.get("groupName") ?? ""))
+  if (groupName && groupName.length > GROUP_NAME_LENGTH_LIMIT) return { error: `グループ名は${GROUP_NAME_LENGTH_LIMIT}文字以内で入力してください。` }
   let pagePath: string | null = null
   if (rawUrl) {
     const parsed = parsePagePath(rawUrl, origin)
     if ("error" in parsed) return { error: parsed.error }
     pagePath = parsed.path
   }
-  const [updated] = await db.update(siteKeyword).set({ pagePath, memo, updatedAt: new Date() })
+  const [updated] = await db.update(siteKeyword).set({ pagePath, groupName, memo, updatedAt: new Date() })
     .where(and(eq(siteKeyword.id, keywordId), eq(siteKeyword.siteId, siteId))).returning({ id: siteKeyword.id })
   if (!updated) return { error: "キーワードが見つかりません。" }
   if (pagePath) {
     await ensureSitePages(siteId, [pagePath])
     await refreshSitePageDates(siteId, origin, { paths: [pagePath], onlyMissing: true })
   }
-  revalidatePath(`/dashboard/sites/${siteId}/keywords`)
+  revalidatePath(`/dashboard/sites/${siteId}/keywords`, "layout")
   return { success: "保存しました。" }
 }
 
@@ -558,7 +560,9 @@ export async function deleteSiteKeyword(formData: FormData): Promise<void> {
   const keywordId = String(formData.get("keywordId") ?? "").trim()
   const origin = await ownedSiteOrigin(siteId, current.user.id)
   if (origin && keywordId) await db.delete(siteKeyword).where(and(eq(siteKeyword.id, keywordId), eq(siteKeyword.siteId, siteId)))
-  revalidatePath(`/dashboard/sites/${siteId}/keywords`)
+  revalidatePath(`/dashboard/sites/${siteId}/keywords`, "layout")
+  // 詳細ページから消したときは、消えたページに残らないよう一覧へ戻す。
+  if (formData.get("from") === "detail") redirect(`/dashboard/sites/${siteId}/keywords`)
 }
 
 export async function refreshSiteKeywordPageDates(_state: SiteKeywordFormState, formData: FormData): Promise<SiteKeywordFormState> {
