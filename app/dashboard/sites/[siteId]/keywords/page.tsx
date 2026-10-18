@@ -4,21 +4,27 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { KeywordTestPeriodForm, SiteKeywordBulkForm, SiteKeywordEditor, SitePageDatesRefreshForm } from "@/components/site-keyword-forms"
 import { db } from "@/lib/db"
-import { account, site, siteKeyword, sitePage } from "@/lib/db/schema"
+import { account, site, siteKeyword, sitePage, subscription } from "@/lib/db/schema"
+import { fetchSearchVolumes, hasDataForSeoCredentials } from "@/lib/dataforseo"
 import { loadKeywordSearchRows } from "@/lib/google-data"
-import { keywordRegexChunks, performanceStartDate, summarizeKeywordPerformance, type KeywordPerformance, type WindowMetrics } from "@/lib/keyword-performance"
+import { keywordMatchKey, keywordRegexChunks, per30Days, performanceStartDate, summarizeKeywordPerformance, type KeywordPerformance, type WindowMetrics } from "@/lib/keyword-performance"
 import { requireSession } from "@/lib/session"
+import { hasPaidAccess } from "@/lib/subscriptions"
 import { measurementStatus, type MeasurementStatus } from "@/lib/site-keywords"
 
 const number = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 1 })
 const PERFORMANCE_MAX_DAYS = 180
 const DAY_MS = 24 * 60 * 60 * 1000
 
-function Metrics({ value }: { value: WindowMetrics | null }) {
-  if (!value) return <span className="muted">データなし</span>
+function Metrics({ value, days, volume }: { value: WindowMetrics | null; days: number; volume?: number | null }) {
+  if (days === 0) return <span className="muted">—</span>
+  if (!value) return <><span className="muted">データなし</span><span className="table-secondary">{days}日間</span></>
+  const monthly = per30Days(value.impressions, days)
+  const rate = monthly !== null && volume ? monthly / volume * 100 : null
   return <>
     <span className="table-primary">{value.position === null ? "—" : `${number.format(value.position)}位`}</span>
-    <span className="table-secondary">表示 {number.format(value.impressions)}・クリック {number.format(value.clicks)}</span>
+    <span className="table-secondary">{days}日間で表示 {number.format(value.impressions)}・クリック {number.format(value.clicks)}</span>
+    {monthly !== null && <span className="table-secondary">30日換算 表示 {number.format(monthly)}{rate !== null && `（表示率 ${number.format(rate)}%）`}</span>}
   </>
 }
 
@@ -63,9 +69,10 @@ export default async function SiteKeywordsPage({ params, searchParams }: { param
   const { siteId } = await params
   const { view } = await searchParams
   const byPage = view === "pages"
-  const [[registeredSite], [googleAccount]] = await Promise.all([
+  const [[registeredSite], [googleAccount], [plan]] = await Promise.all([
     db.select().from(site).where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1),
     db.select({ accountId: account.accountId }).from(account).where(and(eq(account.userId, current.user.id), eq(account.providerId, "google"))).limit(1),
+    db.select({ status: subscription.status, grace: subscription.gracePeriodEndsAt }).from(subscription).where(eq(subscription.userId, current.user.id)).limit(1),
   ])
   if (!registeredSite) notFound()
   const testPeriodDays = registeredSite.keywordTestPeriodDays
@@ -94,11 +101,22 @@ export default async function SiteKeywordsPage({ params, searchParams }: { param
   const period = `${startDate.toISOString().slice(0, 10)}〜${endDate.toISOString().slice(0, 10)}`
   let performance: Map<string, KeywordPerformance> | null = null
   let performanceError: string | null = null
+  // 検索ボリュームは従量課金の外部APIなので、有料プランの利用者にだけ引く。
+  let volumes: Map<string, number | null> | null = null
+  let volumeError: string | null = null
+  if (rows.length > 0 && hasPaidAccess(plan?.status, plan?.grace) && hasDataForSeoCredentials()) {
+    try {
+      const result = await fetchSearchVolumes(rows.map((row) => row.normalizedKeyword))
+      volumes = new Map(result.map((item) => [keywordMatchKey(item.keyword), item.volume]))
+    } catch {
+      volumeError = "検索ボリュームを取得できませんでした。"
+    }
+  }
   if (rows.length > 0 && googleAccount && registeredSite.searchConsoleProperty) {
     try {
       const searchRows = await loadKeywordSearchRows(googleAccount.accountId, await headers(), registeredSite.searchConsoleProperty,
         keywordRegexChunks(rows.map((row) => row.normalizedKeyword)), startDate.toISOString().slice(0, 10), endDate.toISOString().slice(0, 10))
-      performance = summarizeKeywordPerformance(searchRows, assignments, testPeriodDays)
+      performance = summarizeKeywordPerformance(searchRows, assignments, testPeriodDays, { start: startDate.toISOString().slice(0, 10), end: endDate.toISOString().slice(0, 10) })
     } catch (error) {
       const detail = error instanceof Error ? error.message : ""
       performanceError = `Search Console のデータを取得できませんでした。${detail}`
@@ -142,7 +160,8 @@ export default async function SiteKeywordsPage({ params, searchParams }: { param
       </div>
       {rows.length > 0 && <SitePageDatesRefreshForm siteId={siteId} />}
       <KeywordTestPeriodForm siteId={siteId} days={testPeriodDays} />
-      {performance && <p className="muted">Search Console（{period}）。順位は表示回数で重み付けした平均です。表示の少ないクエリは Search Console が匿名化するため、「データなし」でも表示が0回とは限りません。</p>}
+      {performance && <p className="muted">Search Console（{period}）。順位は表示回数で重み付けした平均です。表示回数は列ごとに日数が違うので、30日あたりに換算した値と、月間検索数に対する表示率（30日換算の表示 ÷ 月間検索数）も出しています。表示の少ないクエリは Search Console が匿名化するため、「データなし」でも表示が0回とは限りません。</p>}
+      {volumeError && <p className="muted">{volumeError}</p>}
       {performanceError && <p className="muted">{performanceError}</p>}
 
       {rows.length === 0 ? <p className="muted">まだキーワードがありません。</p> : byPage ? <div className="data-table-wrap">
@@ -158,15 +177,16 @@ export default async function SiteKeywordsPage({ params, searchParams }: { param
         </table>
       </div> : <div className="data-table-wrap">
         <table className="data-table">
-          <thead><tr><th>キーワード</th><th>記事</th><th>公開日／更新日</th><th>状態</th>{performance && <><th>テスト期間</th><th>それ以降</th><th>別のページ</th></>}<th></th></tr></thead>
+          <thead><tr><th>キーワード</th>{volumes && <th>月間検索数</th>}<th>記事</th><th>公開日／更新日</th><th>状態</th>{performance && <><th>テスト期間</th><th>それ以降</th><th>別のページ</th></>}<th></th></tr></thead>
           <tbody>{rows.map((row) => <tr key={row.id}>
             <td><span className="table-primary">{row.keyword}</span>{row.memo && <span className="table-secondary">{row.memo}</span>}</td>
+            {volumes && <td>{(() => { const volume = volumes.get(keywordMatchKey(row.normalizedKeyword)); return volume === undefined || volume === null ? <span className="muted">不明</span> : number.format(volume) })()}</td>}
             <td>{row.pagePath ? <a className="url-text" href={new URL(row.pagePath, origin).href} target="_blank" rel="noreferrer">{row.pagePath}</a> : "—"}</td>
             <td><span className="table-secondary">{formatDate(row.publishedAt)}</span><span className="table-secondary">{formatDate(row.modifiedAt)}</span></td>
             <td><StatusLabel status={row.status} datesError={row.datesError} /></td>
             {performance && <>
-              <td>{row.pagePath ? <Metrics value={performance.get(row.normalizedKeyword)?.testPeriod ?? null} /> : <span className="muted">—</span>}</td>
-              <td>{row.pagePath ? <Metrics value={performance.get(row.normalizedKeyword)?.afterTestPeriod ?? null} /> : <span className="muted">—</span>}</td>
+              <td>{row.pagePath ? <Metrics value={performance.get(row.normalizedKeyword)?.testPeriod ?? null} days={performance.get(row.normalizedKeyword)?.testPeriodDays ?? 0} /> : <span className="muted">—</span>}</td>
+              <td>{row.pagePath ? <Metrics value={performance.get(row.normalizedKeyword)?.afterTestPeriod ?? null} days={performance.get(row.normalizedKeyword)?.afterTestPeriodDays ?? 0} volume={volumes?.get(keywordMatchKey(row.normalizedKeyword))} /> : <span className="muted">—</span>}</td>
               <td><OtherPages value={performance.get(row.normalizedKeyword)} /></td>
             </>}
             <td><SiteKeywordEditor siteId={siteId} keywordId={row.id} keyword={row.keyword} pageUrl={row.pagePath ? new URL(row.pagePath, origin).href : ""} memo={row.memo ?? ""} /></td>

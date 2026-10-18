@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { keywordRegexChunks, performanceStartDate, summarizeKeywordPerformance, type SearchKeywordRow } from "./keyword-performance"
+import { keywordRegexChunks, per30Days, performanceStartDate, summarizeKeywordPerformance, windowDays, type SearchKeywordRow } from "./keyword-performance"
 
 const row = (query: string, page: string, date: string, impressions: number, position: number, clicks = 0): SearchKeywordRow => ({ query, page, date, impressions, position, clicks })
 
@@ -38,10 +38,12 @@ describe("summarizeKeywordPerformance", () => {
       row("youtube 収益化 昔", "https://example.com/guides/history/", "2026-10-14", 10, 5),
       row("youtube 収益化 昔", "https://example.com/guides/history/", "2026-10-15", 30, 10, 2),
       row("YouTube収益化昔", "https://example.com/guides/history/", "2026-10-16", 10, 20),
-    ], assignments, 14)
+    ], assignments, 14, { start: "2026-09-01", end: "2026-10-16" })
     const value = result.get("youtube 収益化 昔")!
     expect(value.testPeriod).toEqual({ impressions: 20, clicks: 1, position: 4 })
     expect(value.afterTestPeriod).toEqual({ impressions: 40, clicks: 2, position: 12.5 })
+    expect(value.testPeriodDays).toBe(14)
+    expect(value.afterTestPeriodDays).toBe(2)
     expect(value.otherPages).toEqual([])
   })
 
@@ -51,7 +53,7 @@ describe("summarizeKeywordPerformance", () => {
       row("youtube 収益化 昔", "https://example.com/guides/hard/", "2026-10-15", 8, 12),
       row("youtube スパチャ", "https://example.com/guides/live/", "2026-10-15", 3, 9),
       row("関係ない語", "https://example.com/guides/live/", "2026-10-15", 100, 1),
-    ], assignments, 14)
+    ], assignments, 14, { start: "2026-09-01", end: "2026-10-16" })
     expect(result.get("youtube 収益化 昔")!.otherPages.map((page) => page.path)).toEqual(["/guides/hard/", "/guides/pillar/"])
     expect(result.get("youtube 収益化 昔")!.afterTestPeriod).toBeNull()
     expect(result.get("youtube スパチャ")!.otherPages).toEqual([{ path: "/guides/live/", impressions: 3, clicks: 0, position: 9 }])
@@ -65,5 +67,28 @@ describe("performanceStartDate", () => {
   })
   it("上限より古ければ上限で切る", () => {
     expect(performanceStartDate([{ normalizedKeyword: "a", pagePath: "/a/", publishedAt: new Date("2025-01-01T00:00:00Z") }], end, 30).toISOString().slice(0, 10)).toBe("2026-09-16")
+  })
+})
+
+describe("windowDays", () => {
+  const range = { start: "2026-09-01", end: "2026-10-16" }
+  it("テスト期間とそれ以降の日数を数える", () => {
+    expect(windowDays(new Date("2026-10-01T00:00:00Z"), 14, range)).toEqual({ testPeriodDays: 14, afterTestPeriodDays: 2 })
+  })
+  it("テスト期間中なら、それ以降は0日", () => {
+    expect(windowDays(new Date("2026-10-10T00:00:00Z"), 14, range)).toEqual({ testPeriodDays: 7, afterTestPeriodDays: 0 })
+  })
+  it("取得期間より前に公開した記事は、取得期間の分だけ数える", () => {
+    expect(windowDays(new Date("2026-08-01T00:00:00Z"), 14, range)).toEqual({ testPeriodDays: 0, afterTestPeriodDays: 46 })
+  })
+  it("公開日が分からなければ全部をそれ以降として数える", () => {
+    expect(windowDays(null, 14, range)).toEqual({ testPeriodDays: 0, afterTestPeriodDays: 46 })
+  })
+})
+
+describe("per30Days", () => {
+  it("30日あたりに換算する", () => {
+    expect(per30Days(9, 9)).toBe(30)
+    expect(per30Days(9, 0)).toBeNull()
   })
 })
