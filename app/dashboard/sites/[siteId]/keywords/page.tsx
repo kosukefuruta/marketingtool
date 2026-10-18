@@ -24,7 +24,7 @@ function Metrics({ value, days, volume }: { value: WindowMetrics | null; days: n
   return <>
     <span className="table-primary">{value.position === null ? "—" : `${number.format(value.position)}位`}</span>
     <span className="table-secondary">{days}日間で表示 {number.format(value.impressions)}・クリック {number.format(value.clicks)}</span>
-    {monthly !== null && <span className="table-secondary">30日換算 表示 {number.format(monthly)}{rate !== null && `（表示率 ${number.format(rate)}%）`}</span>}
+    {monthly !== null && <span className="table-secondary">30日換算 表示 {number.format(monthly)}{rate !== null && `（表示率 ${rate > 0 && rate < 0.1 ? "0.1%未満" : `${number.format(rate)}%`}）`}</span>}
   </>
 }
 
