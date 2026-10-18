@@ -10,8 +10,13 @@ export type OtherPageMetrics = { path: string; impressions: number; clicks: numb
 export type KeywordPerformance = {
   testPeriod: WindowMetrics | null
   afterTestPeriod: WindowMetrics | null
+  /** それぞれの列が集計した日数。表示回数は日数で意味が変わるので、必ず一緒に見る。 */
+  testPeriodDays: number
+  afterTestPeriodDays: number
   otherPages: OtherPageMetrics[]
 }
+
+export type DateRange = { start: string; end: string }
 
 export type KeywordAssignment = { normalizedKeyword: string; pagePath: string | null; publishedAt: Date | null }
 
@@ -67,8 +72,35 @@ function pathOf(page: string): string {
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
+function dayStart(value: Date | string): number {
+  const date = typeof value === "string" ? new Date(`${value}T00:00:00Z`) : value
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+}
+
+function inclusiveDays(from: number, to: number): number {
+  return to < from ? 0 : Math.round((to - from) / DAY_MS) + 1
+}
+
+// 取得期間のうち、テスト期間とそれ以降がそれぞれ何日あるか。
+export function windowDays(publishedAt: Date | null, testPeriodDays: number, range: DateRange): { testPeriodDays: number; afterTestPeriodDays: number } {
+  const start = dayStart(range.start)
+  const end = dayStart(range.end)
+  if (!publishedAt) return { testPeriodDays: 0, afterTestPeriodDays: inclusiveDays(start, end) }
+  const published = dayStart(publishedAt)
+  const boundary = published + testPeriodDays * DAY_MS
+  return {
+    testPeriodDays: inclusiveDays(Math.max(published, start), Math.min(boundary - DAY_MS, end)),
+    afterTestPeriodDays: inclusiveDays(Math.max(boundary, start), end),
+  }
+}
+
+/** 表示回数を30日あたりに換算する。日数の違う列どうしを比べるため。 */
+export function per30Days(impressions: number, days: number): number | null {
+  return days > 0 ? impressions * 30 / days : null
+}
+
 // 割り当てた記事の行は、公開日からテスト期間内とそれ以降に分ける。平均順位は表示回数で重み付けする。
-export function summarizeKeywordPerformance(rows: SearchKeywordRow[], assignments: KeywordAssignment[], testPeriodDays: number): Map<string, KeywordPerformance> {
+export function summarizeKeywordPerformance(rows: SearchKeywordRow[], assignments: KeywordAssignment[], testPeriodDays: number, range: DateRange): Map<string, KeywordPerformance> {
   const byKeyword = new Map<string, KeywordAssignment>()
   for (const assignment of assignments) byKeyword.set(keywordMatchKey(assignment.normalizedKeyword), assignment)
 
@@ -81,8 +113,8 @@ export function summarizeKeywordPerformance(rows: SearchKeywordRow[], assignment
     if (!assignment) continue
     const path = pathOf(row.page)
     if (assignment.pagePath && path === assignment.pagePath) {
-      const boundary = assignment.publishedAt ? assignment.publishedAt.getTime() + testPeriodDays * DAY_MS : null
-      const rowTime = Date.parse(`${row.date}T00:00:00Z`)
+      const boundary = assignment.publishedAt ? dayStart(assignment.publishedAt) + testPeriodDays * DAY_MS : null
+      const rowTime = dayStart(row.date)
       const target = boundary !== null && rowTime < boundary ? test : after
       const value = target.get(keyword) ?? { impressions: 0, clicks: 0, weightedPosition: 0 }
       add(value, row)
@@ -102,7 +134,8 @@ export function summarizeKeywordPerformance(rows: SearchKeywordRow[], assignment
     const otherPages = [...(others.get(keyword) ?? new Map<string, Accumulator>()).entries()]
       .map(([path, value]) => ({ path, impressions: value.impressions, clicks: value.clicks, position: value.impressions ? value.weightedPosition / value.impressions : null }))
       .sort((a, b) => b.impressions - a.impressions)
-    result.set(assignment.normalizedKeyword, { testPeriod: toMetrics(test.get(keyword)), afterTestPeriod: toMetrics(after.get(keyword)), otherPages })
+    const days = assignment.pagePath ? windowDays(assignment.publishedAt, testPeriodDays, range) : { testPeriodDays: 0, afterTestPeriodDays: 0 }
+    result.set(assignment.normalizedKeyword, { testPeriod: toMetrics(test.get(keyword)), afterTestPeriod: toMetrics(after.get(keyword)), ...days, otherPages })
   }
   return result
 }
