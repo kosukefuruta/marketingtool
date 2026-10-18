@@ -99,8 +99,9 @@ export default async function SiteKeywordsPage({ params, searchParams }: { param
       const searchRows = await loadKeywordSearchRows(googleAccount.accountId, await headers(), registeredSite.searchConsoleProperty,
         keywordRegexChunks(rows.map((row) => row.normalizedKeyword)), startDate.toISOString().slice(0, 10), endDate.toISOString().slice(0, 10))
       performance = summarizeKeywordPerformance(searchRows, assignments, testPeriodDays)
-    } catch {
-      performanceError = "Search Console のデータを取得できませんでした。Google連携を確認してください。"
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : ""
+      performanceError = `Search Console のデータを取得できませんでした。${detail}`
     }
   } else if (rows.length > 0) {
     performanceError = "Google連携で Search Console のプロパティを選ぶと、キーワードごとの表示・順位が出ます。"
