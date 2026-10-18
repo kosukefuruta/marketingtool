@@ -1,0 +1,1 @@
+ALTER TABLE "site" ADD COLUMN "keyword_test_period_days" integer DEFAULT 14 NOT NULL;

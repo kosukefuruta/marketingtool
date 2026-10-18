@@ -4,8 +4,11 @@ const KEYWORD_LENGTH_LIMIT = 200
 const PAGE_URL_LENGTH_LIMIT = 2_048
 const KEYWORD_INPUT_LIMIT = KEYWORD_INPUT_LINE_LIMIT * (KEYWORD_LENGTH_LIMIT + PAGE_URL_LENGTH_LIMIT + 2)
 
-// 公開直後は一時的に上位へ出ることがあるため、この日数を過ぎるまでは効果測定に使わない。
+// 公開直後は一時的に上位へ出ることがあるため、この日数を過ぎるまでを「テスト期間」として分けて見る。
+// 既定値はサイト運営者の経験による。サイトごとに変えられる。
 export const TEST_PERIOD_DAYS = 14
+export const TEST_PERIOD_DAYS_MIN = 1
+export const TEST_PERIOD_DAYS_MAX = 90
 
 export type KeywordAssignmentInput = {
   keyword: string
@@ -81,12 +84,17 @@ export type MeasurementStatus =
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
-export function measurementStatus(pagePath: string | null, publishedAt: Date | null, now: Date): MeasurementStatus {
+export function measurementStatus(pagePath: string | null, publishedAt: Date | null, now: Date, testPeriodDays = TEST_PERIOD_DAYS): MeasurementStatus {
   if (!pagePath) return { state: "unassigned" }
   if (!publishedAt) return { state: "unknownDate" }
-  const measurableFrom = new Date(publishedAt.getTime() + TEST_PERIOD_DAYS * DAY_MS)
+  const measurableFrom = new Date(publishedAt.getTime() + testPeriodDays * DAY_MS)
   const daysSincePublished = Math.max(0, Math.floor((now.getTime() - publishedAt.getTime()) / DAY_MS))
   return now < measurableFrom
     ? { state: "testPeriod", measurableFrom, daysSincePublished }
     : { state: "measurable", measurableFrom, daysSincePublished }
+}
+
+export function parseTestPeriodDays(value: string): number | null {
+  const days = Number(value.trim())
+  return Number.isInteger(days) && days >= TEST_PERIOD_DAYS_MIN && days <= TEST_PERIOD_DAYS_MAX ? days : null
 }

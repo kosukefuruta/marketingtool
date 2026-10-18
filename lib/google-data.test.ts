@@ -4,7 +4,7 @@ vi.mock("./auth", () => ({
   auth: { api: { getAccessToken: vi.fn(async () => ({ accessToken: "test-token" })) } },
 }))
 
-import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, type GoogleGoalMetrics } from "./google-data"
+import { googleValueForGoal, loadGoogleGoalMetrics, loadGoogleKeyEvents, loadKeywordSearchRows, type GoogleGoalMetrics } from "./google-data"
 import { searchConsoleSiteMatches } from "./google-property-match"
 
 function jsonResponse(body: object, status = 200): Response {
@@ -263,5 +263,33 @@ describe("Search Console property matching", () => {
   it("does not match another domain", () => {
     expect(searchConsoleSiteMatches("sc-domain:other.example", "https://example.com")).toBe(false)
     expect(searchConsoleSiteMatches("sc-domain:example.com", "https://notexample.com")).toBe(false)
+  })
+})
+
+describe("loadKeywordSearchRows", () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it("asks for query × page × date rows filtered by the keyword regex and reads every page", async () => {
+    const fullPage = Array.from({ length: 25_000 }, (_, index) => ({ keys: ["youtube 収益化", `https://example.com/p${index}/`, "2026-10-15"], clicks: 0, impressions: 1, position: 8 }))
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ rows: fullPage }))
+      .mockResolvedValueOnce(jsonResponse({ rows: [{ keys: ["youtube 収益化", "https://example.com/last/", "2026-10-16"], clicks: 2, impressions: 5, position: 3.5 }] }))
+
+    const rows = await loadKeywordSearchRows("rows-account", new Headers(), "sc-domain:example.com", ["^(?:youtube[\\s　]+収益化)$"], "2026-09-01", "2026-10-16")
+
+    expect(rows).toHaveLength(25_001)
+    expect(rows.at(-1)).toEqual({ query: "youtube 収益化", page: "https://example.com/last/", date: "2026-10-16", clicks: 2, impressions: 5, position: 3.5 })
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
+    expect(firstBody).toMatchObject({
+      startDate: "2026-09-01", endDate: "2026-10-16", dimensions: ["query", "page", "date"], rowLimit: 25_000, startRow: 0,
+      dimensionFilterGroups: [{ filters: [{ dimension: "query", operator: "includingRegex", expression: "^(?:youtube[\\s　]+収益化)$" }] }],
+    })
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).startRow).toBe(25_000)
+  })
+
+  it("does not call the API without keywords", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+    expect(await loadKeywordSearchRows("rows-empty", new Headers(), "sc-domain:example.com", [], "2026-09-01", "2026-10-16")).toEqual([])
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

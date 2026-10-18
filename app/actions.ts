@@ -6,7 +6,7 @@ import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { account, auditJob, goal, goalCtaPage, goalKeyEvent, site, siteKeyword, subscription, user } from "@/lib/db/schema"
-import { parseKeywordAssignments, parsePagePath, SITE_KEYWORD_LIMIT } from "@/lib/site-keywords"
+import { parseKeywordAssignments, parsePagePath, parseTestPeriodDays, SITE_KEYWORD_LIMIT, TEST_PERIOD_DAYS_MAX, TEST_PERIOD_DAYS_MIN } from "@/lib/site-keywords"
 import { ensureSitePages, refreshSitePageDates } from "@/lib/site-page-store"
 import { parseCtaPagePaths } from "@/lib/goal-cta-pages"
 import { loadGoogleProperties } from "@/lib/google-data"
@@ -574,4 +574,16 @@ export async function refreshSiteKeywordPageDates(_state: SiteKeywordFormState, 
   revalidatePath(`/dashboard/sites/${siteId}/keywords`)
   if (result.fetched === 0) return { success: "取り直すページはありませんでした。" }
   return { success: `${result.fetched}ページの日付を取得しました。${result.remaining > 0 ? `残り${result.remaining}ページは、もう一度押すと続きから取得します。` : ""}` }
+}
+
+export async function saveKeywordTestPeriod(_state: SiteKeywordFormState, formData: FormData): Promise<SiteKeywordFormState> {
+  const current = await requireSession()
+  const siteId = String(formData.get("siteId") ?? "").trim()
+  const origin = await ownedSiteOrigin(siteId, current.user.id)
+  if (!origin) return { error: "サイトが見つかりません。" }
+  const days = parseTestPeriodDays(String(formData.get("testPeriodDays") ?? ""))
+  if (days === null) return { error: `テスト期間は${TEST_PERIOD_DAYS_MIN}〜${TEST_PERIOD_DAYS_MAX}日の整数で入力してください。` }
+  await db.update(site).set({ keywordTestPeriodDays: days, updatedAt: new Date() }).where(and(eq(site.id, siteId), eq(site.userId, current.user.id)))
+  revalidatePath(`/dashboard/sites/${siteId}/keywords`)
+  return { success: `テスト期間を${days}日にしました。` }
 }

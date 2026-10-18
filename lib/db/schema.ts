@@ -59,6 +59,7 @@ export const site = pgTable("site", {
   ga4Property: text("ga4_property"),
   status: text("status").notNull().default("pending"),
   ownershipStatus: text("ownership_status").notNull().default("unverified"),
+  keywordTestPeriodDays: integer("keyword_test_period_days").notNull().default(14),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
 }, (table) => [

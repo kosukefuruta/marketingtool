@@ -1,11 +1,35 @@
 import { and, asc, eq } from "drizzle-orm"
+import { headers } from "next/headers"
 import Link from "next/link"
 import { notFound } from "next/navigation"
-import { SiteKeywordBulkForm, SiteKeywordEditor, SitePageDatesRefreshForm } from "@/components/site-keyword-forms"
+import { KeywordTestPeriodForm, SiteKeywordBulkForm, SiteKeywordEditor, SitePageDatesRefreshForm } from "@/components/site-keyword-forms"
 import { db } from "@/lib/db"
-import { site, siteKeyword, sitePage } from "@/lib/db/schema"
+import { account, site, siteKeyword, sitePage } from "@/lib/db/schema"
+import { loadKeywordSearchRows } from "@/lib/google-data"
+import { keywordRegexChunks, performanceStartDate, summarizeKeywordPerformance, type KeywordPerformance, type WindowMetrics } from "@/lib/keyword-performance"
 import { requireSession } from "@/lib/session"
-import { measurementStatus, TEST_PERIOD_DAYS, type MeasurementStatus } from "@/lib/site-keywords"
+import { measurementStatus, type MeasurementStatus } from "@/lib/site-keywords"
+
+const number = new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 1 })
+const PERFORMANCE_MAX_DAYS = 180
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function Metrics({ value }: { value: WindowMetrics | null }) {
+  if (!value) return <span className="muted">データなし</span>
+  return <>
+    <span className="table-primary">{value.position === null ? "—" : `${number.format(value.position)}位`}</span>
+    <span className="table-secondary">表示 {number.format(value.impressions)}・クリック {number.format(value.clicks)}</span>
+  </>
+}
+
+function OtherPages({ value }: { value: KeywordPerformance | undefined }) {
+  const pages = value?.otherPages ?? []
+  if (pages.length === 0) return <span className="muted">—</span>
+  return <>
+    {pages.slice(0, 2).map((page) => <span className="table-secondary" key={page.path}>{page.path}（{page.position === null ? "—" : `${number.format(page.position)}位`}・表示 {number.format(page.impressions)}）</span>)}
+    {pages.length > 2 && <span className="table-secondary">ほか{pages.length - 2}ページ</span>}
+  </>
+}
 
 const dateFormat = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" })
 
@@ -25,6 +49,7 @@ function StatusLabel({ status, datesError }: { status: MeasurementStatus; datesE
 type Row = {
   id: string
   keyword: string
+  normalizedKeyword: string
   pagePath: string | null
   memo: string | null
   publishedAt: Date | null
@@ -38,12 +63,17 @@ export default async function SiteKeywordsPage({ params, searchParams }: { param
   const { siteId } = await params
   const { view } = await searchParams
   const byPage = view === "pages"
-  const [registeredSite] = await db.select().from(site).where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1)
+  const [[registeredSite], [googleAccount]] = await Promise.all([
+    db.select().from(site).where(and(eq(site.id, siteId), eq(site.userId, current.user.id))).limit(1),
+    db.select({ accountId: account.accountId }).from(account).where(and(eq(account.userId, current.user.id), eq(account.providerId, "google"))).limit(1),
+  ])
   if (!registeredSite) notFound()
+  const testPeriodDays = registeredSite.keywordTestPeriodDays
 
   const records = await db.select({
     id: siteKeyword.id,
     keyword: siteKeyword.keyword,
+    normalizedKeyword: siteKeyword.normalizedKeyword,
     pagePath: siteKeyword.pagePath,
     memo: siteKeyword.memo,
     publishedAt: sitePage.publishedAt,
@@ -55,7 +85,26 @@ export default async function SiteKeywordsPage({ params, searchParams }: { param
     .orderBy(asc(siteKeyword.pagePath), asc(siteKeyword.normalizedKeyword))
 
   const now = new Date()
-  const rows: Row[] = records.map((record) => ({ ...record, status: measurementStatus(record.pagePath, record.publishedAt, now) }))
+  const rows: Row[] = records.map((record) => ({ ...record, status: measurementStatus(record.pagePath, record.publishedAt, now, testPeriodDays) }))
+
+  // Search Console は2日ほど遅れて確定するので、2日前までを見る。
+  const endDate = new Date(now.getTime() - 2 * DAY_MS)
+  const assignments = rows.map((row) => ({ normalizedKeyword: row.normalizedKeyword, pagePath: row.pagePath, publishedAt: row.publishedAt }))
+  const startDate = performanceStartDate(assignments, endDate, PERFORMANCE_MAX_DAYS)
+  const period = `${startDate.toISOString().slice(0, 10)}〜${endDate.toISOString().slice(0, 10)}`
+  let performance: Map<string, KeywordPerformance> | null = null
+  let performanceError: string | null = null
+  if (rows.length > 0 && googleAccount && registeredSite.searchConsoleProperty) {
+    try {
+      const searchRows = await loadKeywordSearchRows(googleAccount.accountId, await headers(), registeredSite.searchConsoleProperty,
+        keywordRegexChunks(rows.map((row) => row.normalizedKeyword)), startDate.toISOString().slice(0, 10), endDate.toISOString().slice(0, 10))
+      performance = summarizeKeywordPerformance(searchRows, assignments, testPeriodDays)
+    } catch {
+      performanceError = "Search Console のデータを取得できませんでした。Google連携を確認してください。"
+    }
+  } else if (rows.length > 0) {
+    performanceError = "Google連携で Search Console のプロパティを選ぶと、キーワードごとの表示・順位が出ます。"
+  }
   const pages = new Map<string, Row[]>()
   for (const row of rows) if (row.pagePath) pages.set(row.pagePath, [...(pages.get(row.pagePath) ?? []), row])
   const count = (state: MeasurementStatus["state"]) => rows.filter((row) => row.status.state === state).length
@@ -65,7 +114,7 @@ export default async function SiteKeywordsPage({ params, searchParams }: { param
   return <div className="stack">
     <div>
       <h2>キーワード</h2>
-      <p className="muted">狙うキーワードごとに記事を割り当てます。記事の公開日・更新日はページの構造化データから読み取り、公開から{TEST_PERIOD_DAYS}日間はテスト期間として測定から外します。</p>
+      <p className="muted">狙うキーワードごとに記事を割り当てます。記事の公開日・更新日はページの構造化データから読み取ります。公開から{testPeriodDays}日間はテスト期間として、それ以降の数字と分けて表示します。</p>
     </div>
 
     <details className={`goal-add ${rows.length ? "goal-add-collapsed" : "card"}`} open={rows.length === 0}>
@@ -91,6 +140,9 @@ export default async function SiteKeywordsPage({ params, searchParams }: { param
         <div><span>記事未割り当て</span><strong>{count("unassigned")}</strong></div>
       </div>
       {rows.length > 0 && <SitePageDatesRefreshForm siteId={siteId} />}
+      <KeywordTestPeriodForm siteId={siteId} days={testPeriodDays} />
+      {performance && <p className="muted">Search Console（{period}）。順位は表示回数で重み付けした平均です。表示の少ないクエリは Search Console が匿名化するため、「データなし」でも表示が0回とは限りません。</p>}
+      {performanceError && <p className="muted">{performanceError}</p>}
 
       {rows.length === 0 ? <p className="muted">まだキーワードがありません。</p> : byPage ? <div className="data-table-wrap">
         <table className="data-table">
@@ -105,13 +157,17 @@ export default async function SiteKeywordsPage({ params, searchParams }: { param
         </table>
       </div> : <div className="data-table-wrap">
         <table className="data-table">
-          <thead><tr><th>キーワード</th><th>記事</th><th>公開日</th><th>更新日</th><th>状態</th><th></th></tr></thead>
+          <thead><tr><th>キーワード</th><th>記事</th><th>公開日／更新日</th><th>状態</th>{performance && <><th>テスト期間</th><th>それ以降</th><th>別のページ</th></>}<th></th></tr></thead>
           <tbody>{rows.map((row) => <tr key={row.id}>
             <td><span className="table-primary">{row.keyword}</span>{row.memo && <span className="table-secondary">{row.memo}</span>}</td>
             <td>{row.pagePath ? <a className="url-text" href={new URL(row.pagePath, origin).href} target="_blank" rel="noreferrer">{row.pagePath}</a> : "—"}</td>
-            <td>{formatDate(row.publishedAt)}</td>
-            <td>{formatDate(row.modifiedAt)}</td>
+            <td><span className="table-secondary">{formatDate(row.publishedAt)}</span><span className="table-secondary">{formatDate(row.modifiedAt)}</span></td>
             <td><StatusLabel status={row.status} datesError={row.datesError} /></td>
+            {performance && <>
+              <td>{row.pagePath ? <Metrics value={performance.get(row.normalizedKeyword)?.testPeriod ?? null} /> : <span className="muted">—</span>}</td>
+              <td>{row.pagePath ? <Metrics value={performance.get(row.normalizedKeyword)?.afterTestPeriod ?? null} /> : <span className="muted">—</span>}</td>
+              <td><OtherPages value={performance.get(row.normalizedKeyword)} /></td>
+            </>}
             <td><SiteKeywordEditor siteId={siteId} keywordId={row.id} keyword={row.keyword} pageUrl={row.pagePath ? new URL(row.pagePath, origin).href : ""} memo={row.memo ?? ""} /></td>
           </tr>)}</tbody>
         </table>

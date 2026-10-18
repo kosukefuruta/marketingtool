@@ -64,3 +64,20 @@ describe("measurementStatus", () => {
     expect(measurementStatus("/a/", new Date("2026-09-20T00:00:00Z"), now)).toMatchObject({ state: "measurable", daysSincePublished: 28 })
   })
 })
+
+describe("parseTestPeriodDays", () => {
+  it("1〜90の整数だけを受け付ける", async () => {
+    const { parseTestPeriodDays } = await import("./site-keywords")
+    expect(parseTestPeriodDays("14")).toBe(14)
+    expect(parseTestPeriodDays(" 30 ")).toBe(30)
+    expect(parseTestPeriodDays("0")).toBeNull()
+    expect(parseTestPeriodDays("91")).toBeNull()
+    expect(parseTestPeriodDays("7.5")).toBeNull()
+    expect(parseTestPeriodDays("")).toBeNull()
+  })
+
+  it("テスト期間の日数を変えられる", () => {
+    const status = measurementStatus("/a/", new Date("2026-10-10T00:00:00Z"), new Date("2026-10-18T00:00:00Z"), 7)
+    expect(status.state).toBe("measurable")
+  })
+})
