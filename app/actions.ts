@@ -5,7 +5,9 @@ import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
-import { account, auditJob, goal, goalCtaPage, goalKeyEvent, site, subscription, user } from "@/lib/db/schema"
+import { account, auditJob, goal, goalCtaPage, goalKeyEvent, site, siteKeyword, subscription, user } from "@/lib/db/schema"
+import { parseKeywordAssignments, parsePagePath, SITE_KEYWORD_LIMIT } from "@/lib/site-keywords"
+import { ensureSitePages, refreshSitePageDates } from "@/lib/site-page-store"
 import { parseCtaPagePaths } from "@/lib/goal-cta-pages"
 import { loadGoogleProperties } from "@/lib/google-data"
 import { goalKeyEventStages, isValidGoogleEventName, keyEventFieldName, keyEventStagesForMetric, manualKeyEventFieldName, type GoalKeyEventStage } from "@/lib/goal-key-events"
@@ -483,4 +485,93 @@ export async function scheduleCancellation(): Promise<void> {
 
 export async function resumeSubscription(): Promise<void> {
   await setCancelAtPeriodEnd(false)
+}
+
+export type SiteKeywordFormState = { error?: string; success?: string }
+
+async function ownedSiteOrigin(siteId: string, userId: string): Promise<string | null> {
+  if (!siteId) return null
+  const [owned] = await db.select({ origin: site.normalizedOrigin }).from(site).where(and(eq(site.id, siteId), eq(site.userId, userId))).limit(1)
+  return owned?.origin ?? null
+}
+
+export async function saveSiteKeywords(_state: SiteKeywordFormState, formData: FormData): Promise<SiteKeywordFormState> {
+  const current = await requireSession()
+  const siteId = String(formData.get("siteId") ?? "").trim()
+  const origin = await ownedSiteOrigin(siteId, current.user.id)
+  if (!origin) return { error: "サイトが見つかりません。" }
+  const parsed = parseKeywordAssignments(String(formData.get("keywords") ?? ""), origin)
+  if (parsed.error) return { error: parsed.error }
+  if (parsed.items.length === 0) return { error: "キーワードを1行に1つずつ入力してください。" }
+
+  const existing = await db.select({ normalizedKeyword: siteKeyword.normalizedKeyword }).from(siteKeyword).where(eq(siteKeyword.siteId, siteId))
+  const existingSet = new Set(existing.map((row) => row.normalizedKeyword))
+  const added = parsed.items.filter((item) => !existingSet.has(item.normalizedKeyword)).length
+  if (existing.length + added > SITE_KEYWORD_LIMIT) return { error: `キーワードは1サイト${SITE_KEYWORD_LIMIT.toLocaleString("ja-JP")}件まで登録できます。` }
+
+  const now = new Date()
+  await db.insert(siteKeyword)
+    .values(parsed.items.map((item) => ({ id: crypto.randomUUID(), siteId, keyword: item.keyword, normalizedKeyword: item.normalizedKeyword, pagePath: item.pagePath, createdAt: now, updatedAt: now })))
+    .onConflictDoUpdate({
+      target: [siteKeyword.siteId, siteKeyword.normalizedKeyword],
+      // URLを書かずに登録し直したときは、既存の割り当てを消さない。
+      set: { pagePath: sql`coalesce(excluded.page_path, ${siteKeyword.pagePath})`, updatedAt: now },
+    })
+
+  const paths = parsed.items.flatMap((item) => item.pagePath ? [item.pagePath] : [])
+  await ensureSitePages(siteId, paths)
+  const dates = await refreshSitePageDates(siteId, origin, { paths: [...new Set(paths)], onlyMissing: true })
+  revalidatePath(`/dashboard/sites/${siteId}/keywords`)
+  const updated = parsed.items.length - added
+  const remaining = dates.remaining > 0 ? `残り${dates.remaining}ページの日付は「日付を取り直す」で取得してください。` : ""
+  return { success: `${added}件を追加し、${updated}件を更新しました。${remaining}` }
+}
+
+export async function updateSiteKeyword(_state: SiteKeywordFormState, formData: FormData): Promise<SiteKeywordFormState> {
+  const current = await requireSession()
+  const siteId = String(formData.get("siteId") ?? "").trim()
+  const keywordId = String(formData.get("keywordId") ?? "").trim()
+  const origin = await ownedSiteOrigin(siteId, current.user.id)
+  if (!origin || !keywordId) return { error: "キーワードが見つかりません。" }
+  const rawUrl = String(formData.get("pageUrl") ?? "").trim()
+  const memo = String(formData.get("memo") ?? "").trim().slice(0, 1_000) || null
+  let pagePath: string | null = null
+  if (rawUrl) {
+    const parsed = parsePagePath(rawUrl, origin)
+    if ("error" in parsed) return { error: parsed.error }
+    pagePath = parsed.path
+  }
+  const [updated] = await db.update(siteKeyword).set({ pagePath, memo, updatedAt: new Date() })
+    .where(and(eq(siteKeyword.id, keywordId), eq(siteKeyword.siteId, siteId))).returning({ id: siteKeyword.id })
+  if (!updated) return { error: "キーワードが見つかりません。" }
+  if (pagePath) {
+    await ensureSitePages(siteId, [pagePath])
+    await refreshSitePageDates(siteId, origin, { paths: [pagePath], onlyMissing: true })
+  }
+  revalidatePath(`/dashboard/sites/${siteId}/keywords`)
+  return { success: "保存しました。" }
+}
+
+export async function deleteSiteKeyword(formData: FormData): Promise<void> {
+  const current = await requireSession()
+  const siteId = String(formData.get("siteId") ?? "").trim()
+  const keywordId = String(formData.get("keywordId") ?? "").trim()
+  const origin = await ownedSiteOrigin(siteId, current.user.id)
+  if (origin && keywordId) await db.delete(siteKeyword).where(and(eq(siteKeyword.id, keywordId), eq(siteKeyword.siteId, siteId)))
+  revalidatePath(`/dashboard/sites/${siteId}/keywords`)
+}
+
+export async function refreshSiteKeywordPageDates(_state: SiteKeywordFormState, formData: FormData): Promise<SiteKeywordFormState> {
+  const current = await requireSession()
+  const siteId = String(formData.get("siteId") ?? "").trim()
+  const origin = await ownedSiteOrigin(siteId, current.user.id)
+  if (!origin) return { error: "サイトが見つかりません。" }
+  const assigned = await db.selectDistinct({ path: siteKeyword.pagePath }).from(siteKeyword).where(and(eq(siteKeyword.siteId, siteId), sql`${siteKeyword.pagePath} is not null`))
+  const paths = assigned.flatMap((row) => row.path ? [row.path] : [])
+  await ensureSitePages(siteId, paths)
+  const onlyMissing = formData.get("mode") !== "all"
+  const result = await refreshSitePageDates(siteId, origin, { paths, onlyMissing })
+  revalidatePath(`/dashboard/sites/${siteId}/keywords`)
+  if (result.fetched === 0) return { success: "取り直すページはありませんでした。" }
+  return { success: `${result.fetched}ページの日付を取得しました。${result.remaining > 0 ? `残り${result.remaining}ページは、もう一度押すと続きから取得します。` : ""}` }
 }
