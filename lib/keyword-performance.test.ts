@@ -4,8 +4,18 @@ import { keywordRegexChunks, performanceStartDate, summarizeKeywordPerformance, 
 const row = (query: string, page: string, date: string, impressions: number, position: number, clicks = 0): SearchKeywordRow => ({ query, page, date, impressions, position, clicks })
 
 describe("keywordRegexChunks", () => {
-  it("完全一致の正規表現にまとめ、記号はエスケープし、空白は全角も許す", () => {
-    expect(keywordRegexChunks(["youtube 収益化", "c++ 入門"])).toEqual(["^(?:youtube[\\s　]+収益化|c\\+\\+[\\s　]+入門)$"])
+  it("完全一致の正規表現にまとめ、記号はエスケープし、文字のあいだの空白はあってもなくてもよい", () => {
+    const [chunk] = keywordRegexChunks(["ab c", "c++"])
+    expect(chunk).toBe("^(?:a[\\s　]*b[\\s　]*c|c[\\s　]*\\+[\\s　]*\\+)$")
+    const regex = new RegExp(chunk)
+    expect(regex.test("abc")).toBe(true)
+    expect(regex.test("a b　c")).toBe(true)
+    expect(regex.test("abcd")).toBe(false)
+  })
+
+  it("空白だけが違うキーワードは1つにまとめる", () => {
+    expect(keywordRegexChunks(["youtube 収益化", "youtube収益化"])).toHaveLength(1)
+    expect(new RegExp(keywordRegexChunks(["youtube 収益化 しない方法"])[0]).test("youtube 収益化しない方法")).toBe(true)
   })
 
   it("長くなったら分ける", () => {
@@ -27,7 +37,7 @@ describe("summarizeKeywordPerformance", () => {
       row("youtube 収益化 昔", "https://example.com/guides/history/", "2026-10-03", 10, 3, 1),
       row("youtube 収益化 昔", "https://example.com/guides/history/", "2026-10-14", 10, 5),
       row("youtube 収益化 昔", "https://example.com/guides/history/", "2026-10-15", 30, 10, 2),
-      row("YouTube 収益化 昔", "https://example.com/guides/history/", "2026-10-16", 10, 20),
+      row("YouTube収益化昔", "https://example.com/guides/history/", "2026-10-16", 10, 20),
     ], assignments, 14)
     const value = result.get("youtube 収益化 昔")!
     expect(value.testPeriod).toEqual({ impressions: 20, clicks: 1, position: 4 })

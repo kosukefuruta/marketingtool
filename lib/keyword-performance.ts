@@ -22,9 +22,14 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
-// 語と語のあいだは半角・全角の空白どちらでも一致させる。
+// 日本語の検索語は空白の入れ方がばらつく（「収益化しない」「収益化 しない」）。照合は空白を取り除いた形どうしで行う。
+export function keywordMatchKey(value: string): string {
+  return normalizeKeyword(value).replace(/ /g, "")
+}
+
+// 文字と文字のあいだに空白（半角・全角）があってもなくても一致させる。
 export function keywordRegexChunks(normalizedKeywords: string[]): string[] {
-  const patterns = [...new Set(normalizedKeywords)].filter(Boolean).map((keyword) => keyword.split(" ").map(escapeRegex).join("[\\s　]+"))
+  const patterns = [...new Set(normalizedKeywords.map(keywordMatchKey))].filter(Boolean).map((key) => [...key].map(escapeRegex).join("[\\s　]*"))
   const chunks: string[] = []
   let current: string[] = []
   const wrap = (items: string[]) => `^(?:${items.join("|")})$`
@@ -65,13 +70,13 @@ const DAY_MS = 24 * 60 * 60 * 1000
 // 割り当てた記事の行は、公開日からテスト期間内とそれ以降に分ける。平均順位は表示回数で重み付けする。
 export function summarizeKeywordPerformance(rows: SearchKeywordRow[], assignments: KeywordAssignment[], testPeriodDays: number): Map<string, KeywordPerformance> {
   const byKeyword = new Map<string, KeywordAssignment>()
-  for (const assignment of assignments) byKeyword.set(assignment.normalizedKeyword, assignment)
+  for (const assignment of assignments) byKeyword.set(keywordMatchKey(assignment.normalizedKeyword), assignment)
 
   const test = new Map<string, Accumulator>()
   const after = new Map<string, Accumulator>()
   const others = new Map<string, Map<string, Accumulator>>()
   for (const row of rows) {
-    const keyword = normalizeKeyword(row.query)
+    const keyword = keywordMatchKey(row.query)
     const assignment = byKeyword.get(keyword)
     if (!assignment) continue
     const path = pathOf(row.page)
@@ -93,11 +98,11 @@ export function summarizeKeywordPerformance(rows: SearchKeywordRow[], assignment
 
   const result = new Map<string, KeywordPerformance>()
   for (const assignment of assignments) {
-    const keyword = assignment.normalizedKeyword
+    const keyword = keywordMatchKey(assignment.normalizedKeyword)
     const otherPages = [...(others.get(keyword) ?? new Map<string, Accumulator>()).entries()]
       .map(([path, value]) => ({ path, impressions: value.impressions, clicks: value.clicks, position: value.impressions ? value.weightedPosition / value.impressions : null }))
       .sort((a, b) => b.impressions - a.impressions)
-    result.set(keyword, { testPeriod: toMetrics(test.get(keyword)), afterTestPeriod: toMetrics(after.get(keyword)), otherPages })
+    result.set(assignment.normalizedKeyword, { testPeriod: toMetrics(test.get(keyword)), afterTestPeriod: toMetrics(after.get(keyword)), otherPages })
   }
   return result
 }
