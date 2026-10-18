@@ -15,8 +15,8 @@ export type KeywordPerformance = {
 
 export type KeywordAssignment = { normalizedKeyword: string; pagePath: string | null; publishedAt: Date | null }
 
-// Search Console の正規表現フィルタは長さに上限があるので、まとめるキーワードを分ける。
-const REGEX_CHUNK_LIMIT = 3_500
+// Search Console の正規表現フィルタは長さに上限がある（4,096前後）。日本語は1文字3バイトなので、バイト数で余裕を持って分ける。
+const REGEX_CHUNK_BYTES = 3_000
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -27,14 +27,14 @@ export function keywordMatchKey(value: string): string {
   return normalizeKeyword(value).replace(/ /g, "")
 }
 
-// 文字と文字のあいだに空白（半角・全角）があってもなくても一致させる。
+// 文字と文字のあいだに空白があってもなくても一致させる。Search Console のクエリは空白が半角1つにそろっている。
 export function keywordRegexChunks(normalizedKeywords: string[]): string[] {
-  const patterns = [...new Set(normalizedKeywords.map(keywordMatchKey))].filter(Boolean).map((key) => [...key].map(escapeRegex).join("[\\s　]*"))
+  const patterns = [...new Set(normalizedKeywords.map(keywordMatchKey))].filter(Boolean).map((key) => [...key].map(escapeRegex).join(" ?"))
   const chunks: string[] = []
   let current: string[] = []
   const wrap = (items: string[]) => `^(?:${items.join("|")})$`
   for (const pattern of patterns) {
-    if (current.length > 0 && wrap([...current, pattern]).length > REGEX_CHUNK_LIMIT) {
+    if (current.length > 0 && new TextEncoder().encode(wrap([...current, pattern])).length > REGEX_CHUNK_BYTES) {
       chunks.push(wrap(current))
       current = []
     }

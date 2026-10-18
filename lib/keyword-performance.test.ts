@@ -6,10 +6,10 @@ const row = (query: string, page: string, date: string, impressions: number, pos
 describe("keywordRegexChunks", () => {
   it("完全一致の正規表現にまとめ、記号はエスケープし、文字のあいだの空白はあってもなくてもよい", () => {
     const [chunk] = keywordRegexChunks(["ab c", "c++"])
-    expect(chunk).toBe("^(?:a[\\s　]*b[\\s　]*c|c[\\s　]*\\+[\\s　]*\\+)$")
+    expect(chunk).toBe("^(?:a ?b ?c|c ?\\+ ?\\+)$")
     const regex = new RegExp(chunk)
     expect(regex.test("abc")).toBe(true)
-    expect(regex.test("a b　c")).toBe(true)
+    expect(regex.test("a b c")).toBe(true)
     expect(regex.test("abcd")).toBe(false)
   })
 
@@ -19,10 +19,10 @@ describe("keywordRegexChunks", () => {
   })
 
   it("長くなったら分ける", () => {
-    const keywords = Array.from({ length: 400 }, (_, index) => `keyword number ${index}`)
+    const keywords = Array.from({ length: 400 }, (_, index) => `ユーチューブ 収益化 ${index}`)
     const chunks = keywordRegexChunks(keywords)
     expect(chunks.length).toBeGreaterThan(1)
-    expect(chunks.every((chunk) => chunk.length <= 3_500)).toBe(true)
+    expect(chunks.every((chunk) => new TextEncoder().encode(chunk).length <= 3_000)).toBe(true)
   })
 })
 
