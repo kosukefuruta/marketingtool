@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { auditJob, site, subscription } from "@/lib/db/schema"
 import { getSession } from "@/lib/session"
 import { hasPaidAccess } from "@/lib/subscriptions"
+import { wakeAuditWorker } from "@/lib/audit-wake"
 
 export const runtime = "nodejs"
 
@@ -54,6 +55,7 @@ export async function POST(request: Request) {
       createdAt: now,
       updatedAt: now,
     })
+    wakeAuditWorker()
     return Response.json({ id, statusUrl: `/api/jobs/${id}` }, { status: 202 })
   } catch (error) {
     if (typeof error === "object" && error && "code" in error && error.code === "23505") {

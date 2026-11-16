@@ -6,13 +6,40 @@ import { sql } from "drizzle-orm"
 import { db } from "../lib/db/index.js"
 import { auditJob } from "../lib/db/schema.js"
 import { retryDelayMs, shouldRetry, shouldStopWorker } from "../lib/audit-worker-policy.js"
-import { claimAuditJob, recoverInterruptedAuditJobs, type ClaimedAuditJob } from "../lib/audit-queue.js"
+import { claimAuditJob, nextAuditDueAt, recoverInterruptedAuditJobs, type ClaimedAuditJob } from "../lib/audit-queue.js"
 import { deleteExpiredAuditData } from "../lib/audit-retention.js"
 import { saveAuditResult, type StructuredAuditResult } from "../lib/audit-result-store.js"
 
 const workerId = `${process.env.HOSTNAME ?? "worker"}-${process.pid}`
 const pollMs = 2_000
 const retentionIntervalMs = 24 * 60 * 60 * 1000
+
+// 仕事が無い間は次の期限まで眠る（以前は2秒ごとに空振りで DB を見ていて、Neon が一度も停止しなかった）。
+// web が診断を受け付けると supervisor 経由で "audit:wake" が届き、眠りを切り上げる。
+// 眠っていない間（claim や期限の計算の最中）に届いた合図は wakePending に残す。捨てると、期限の計算が
+// enqueue より先に走っていた場合にその診断を見ないまま長く眠ってしまう。
+let wake: (() => void) | undefined
+let wakePending = false
+function sleepUntilWoken(ms: number): Promise<void> {
+  if (wakePending) return Promise.resolve()
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms)
+    function done() { clearTimeout(timer); wake = undefined; resolve() }
+    wake = done
+  })
+}
+process.on("message", (message: unknown) => {
+  if ((message as { type?: string } | null)?.type !== "audit:wake") return
+  if (wake) wake()
+  else wakePending = true
+})
+
+async function idleDelayMs(nextRetentionCleanupAt: number): Promise<number> {
+  const due = await nextAuditDueAt()
+  const until = Math.min(due ?? Infinity, nextRetentionCleanupAt)
+  // 期限が来ているのに取れない（他の worker が掴んでいる等）ときに空回りしないよう、最短は従来の間隔
+  return Math.max(until - Date.now(), pollMs)
+}
 
 async function run(job: ClaimedAuditJob): Promise<void> {
   const reportPath = join(tmpdir(), `seo-report-${job.id}.md`)
@@ -75,9 +102,10 @@ async function main(): Promise<void> {
         nextRetentionCleanupAt = Date.now() + retentionIntervalMs
       }
       await recoverInterruptedAuditJobs()
+      wakePending = false // ここから先の claim が、それまでに届いた合図の分を拾う
       const job = await claimAuditJob()
       infrastructureFailures = 0
-      if (!job) { await new Promise((resolve) => setTimeout(resolve, pollMs)); continue }
+      if (!job) { await sleepUntilWoken(await idleDelayMs(nextRetentionCleanupAt)); continue }
       try {
         await run(job)
       } catch (error) {
