@@ -18,7 +18,8 @@ function stopChildren(signal: NodeJS.Signals = "SIGTERM"): void {
 }
 
 function start(label: string, file: string): ChildProcess {
-  const child = spawn(process.execPath, [file], { stdio: "inherit", env: process.env })
+  // ipc: web が診断を受け付けたら worker を起こす合図をここで中継する（下の relay）。
+  const child = spawn(process.execPath, [file], { stdio: ["inherit", "inherit", "inherit", "ipc"], env: process.env })
   children.push(child)
   child.once("exit", (code, signal) => {
     if (stopping) return
@@ -30,8 +31,17 @@ function start(label: string, file: string): ChildProcess {
   return child
 }
 
-start("web", "server.js")
-start("audit-worker", "audit-worker.mjs")
+const web = start("web", "server.js")
+const worker = start("audit-worker", "audit-worker.mjs")
+
+// worker は仕事が無いと次の期限まで眠る（2秒ごとに空振りで DB を見ると Neon が停止できない）。
+// web がキューに入れた直後の合図を worker へ渡して起こす。
+web.on("message", (message: unknown) => {
+  if ((message as { type?: string } | null)?.type !== "audit:wake" || !worker.connected) return
+  worker.send({ type: "audit:wake" }, (error) => {
+    if (error) console.warn("[supervisor] could not wake audit-worker", { message: error.message })
+  })
+})
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
