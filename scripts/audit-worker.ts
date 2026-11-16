@@ -34,9 +34,16 @@ process.on("message", (message: unknown) => {
   else wakePending = true
 })
 
+// 合図が届かない起動（ipc なし＝`pnpm audit:worker` を手で動かす dev）では、従来どおり短い間隔で見る。
+const hasWakeChannel = typeof process.send === "function"
+// 合図を取りこぼしても（relay の失敗・デプロイの重なりで別の worker が掴んで落ちた等）遅れに上限を付ける。
+// Neon の停止（5分無通信）より十分長いので、空いている時間の大半は止まっていられる。
+const maxIdleMs = 60 * 60 * 1000
+
 async function idleDelayMs(nextRetentionCleanupAt: number): Promise<number> {
+  if (!hasWakeChannel) return pollMs
   const due = await nextAuditDueAt()
-  const until = Math.min(due ?? Infinity, nextRetentionCleanupAt)
+  const until = Math.min(due ?? Infinity, nextRetentionCleanupAt, Date.now() + maxIdleMs)
   // 期限が来ているのに取れない（他の worker が掴んでいる等）ときに空回りしないよう、最短は従来の間隔
   return Math.max(until - Date.now(), pollMs)
 }
@@ -104,8 +111,14 @@ async function main(): Promise<void> {
       await recoverInterruptedAuditJobs()
       wakePending = false // ここから先の claim が、それまでに届いた合図の分を拾う
       const job = await claimAuditJob()
+      if (!job) {
+        const delay = await idleDelayMs(nextRetentionCleanupAt)
+        // 期限の計算まで通ってから数え直す（先に戻すと、ここで落ち続けても失敗が積み上がらず2秒ごとに DB を叩き続ける）
+        infrastructureFailures = 0
+        await sleepUntilWoken(delay)
+        continue
+      }
       infrastructureFailures = 0
-      if (!job) { await sleepUntilWoken(await idleDelayMs(nextRetentionCleanupAt)); continue }
       try {
         await run(job)
       } catch (error) {

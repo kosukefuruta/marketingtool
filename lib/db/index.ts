@@ -12,6 +12,9 @@ if (!databaseUrl && process.env.NEXT_PHASE !== "phase-production-build") {
 
 const client = globalThis.__marketingToolPg ?? postgres(databaseUrl ?? "postgres://localhost/marketingtool", {
   max: process.env.NODE_ENV === "production" ? 10 : 3,
+  // Neon は5分無通信で停止し、そのとき接続を切る。使っていない接続はそれより先に自分で閉じ、
+  // 再開後の最初のクエリが切られた接続に当たらないようにする（秒）。
+  idle_timeout: 60,
 })
 
 if (process.env.NODE_ENV !== "production") globalThis.__marketingToolPg = client
